@@ -7,7 +7,7 @@ import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { botInput } from "../shared/bot.ts";
 import { InputQueue } from "../shared/netcode.ts";
-import { MAPS, TICK_HZ, createGame, tickGame, type Game } from "../shared/sim.ts";
+import { MAPS, TICK_HZ, createGame, sideOf, tickGame, type Game } from "../shared/sim.ts";
 
 const PORT = Number(process.env.PORT) || 8000;
 const SEATS = 4;
@@ -61,6 +61,7 @@ interface Room {
   countdown: number; // ticks left, 0 = not counting down
   game: Game | null;
   roster: Seat[]; // sim player i = roster[i]
+  tally: Map<string, { name: string; wins: number }>; // match wins tonight, by client token ("bots" for all bots)
 }
 
 // shortcut: rooms live in this process's memory; fine for one instance, needs shared state to scale out.
@@ -83,6 +84,9 @@ function sendLobby(room: Room) {
       }),
       bots: room.bots,
       settings: room.settings,
+      tally: [...room.tally]
+        .map(([k, e]) => ({ name: room.clients.find((x) => x.token === k)?.name ?? e.name, wins: e.wins, you: k === c.token }))
+        .sort((a, b) => b.wins - a.wins),
       countdown: Math.ceil(room.countdown / TICK_HZ),
       playing: !!room.game,
     });
@@ -117,6 +121,15 @@ function startMatch(room: Room) {
 }
 
 function endMatch(room: Room) {
+  const g = room.game;
+  if (g && g.matchWinner >= 0) {
+    const side = sideOf(g, g.matchWinner);
+    const winners = new Map<string, string>(); // token → name; bots share one entry
+    room.roster.forEach((r, i) => {
+      if (sideOf(g, i) === side) winners.set(r.client?.token ?? "bots", r.client?.name ?? "Bots");
+    });
+    for (const [key, name] of winners) room.tally.set(key, { name, wins: (room.tally.get(key)?.wins ?? 0) + 1 });
+  }
   room.game = null;
   room.roster = [];
   room.clients = room.clients.filter((c) => c.ws); // whoever never came back loses their seat
@@ -219,7 +232,7 @@ wss.on("connection", (ws, req) => {
   if (!/^[a-z0-9]{4,8}$/.test(code)) return ws.close(1008, "bad room");
   let room = rooms.get(code);
   if (!room) {
-    room = { code, clients: [], bots: true, settings: { map: -1, teams: false, winRounds: 2 }, countdown: 0, game: null, roster: [] };
+    room = { code, clients: [], bots: true, settings: { map: -1, teams: false, winRounds: 2 }, countdown: 0, game: null, roster: [], tally: new Map() };
     rooms.set(code, room);
   }
   const r = room;

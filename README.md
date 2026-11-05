@@ -2,12 +2,17 @@
 
 A 4-player online bomb-maze brawl set in the Critter Catch world, made for playing with friends in the browser. Drop orbs, break bushes, grab power-ups, and be the last trainer standing. At 0:00 the walls close in.
 
-**Status: milestone 3.** It's online, with invite links, a lobby and rollback netcode; bots fill empty seats.
+**Status: milestone 4.** It's online, with invite links, a lobby and rollback netcode; bots fill empty seats. It has sound, music and gamepad support, and keeps score for the evening.
 
 - **Maps:** Meadow; Ice Rink (you slide until you hit something); Factory (conveyor belts); Portal Garden (two linked pairs). Pick one in the lobby, or Random for a new map each round.
 - **Modes:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
 - **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one at a time). Nobody sits out.
 - **Power-ups:** Orb+, Fire+, Speed+, Kick, Shield, Remote, Pierce (blasts through bushes), Napalm (2 s fire), and Skull (a random 10 s curse: reversed, sluggish, butterfingers or fizzle, passed on by touch).
+- **Feel:**
+  - Sound effects and an original chiptune loop, synthesised in the browser (no audio files), with Sound and Music toggles.
+  - Gamepads work.
+  - Rollback corrections glide instead of snapping.
+  - The lobby shows match wins for the evening.
 
 ## Run it
 
@@ -29,6 +34,7 @@ Controls:
 - Move: arrows or WASD
 - Drop an orb: Space or Z
 - Detonate (with Remote): X or Shift
+- Gamepad: D-pad or left stick to move, A to drop, B or X to detonate. In the lobby, A or Start toggles ready.
 
 ## How it stays in sync
 
@@ -52,6 +58,7 @@ server/main.ts          static files, rooms, lobby, 60 Hz match loop
 server/dev.ts           dev entry: esbuild watch + server
 client/main.ts          input, connection, lobby, HUD, frame loop
 client/render.ts        drawing
+client/audio.ts         synthesised sound effects + music loop
 client/sprites.ts       pixel art (the trainer comes from Critter Catch)
 public/index.html       the page
 ```
@@ -72,5 +79,5 @@ Rooms live in memory in one process, so a deploy or restart ends any match in pr
 1. ~~Offline game: rules, bots, 6 power-ups, shrinking arena~~
 2. ~~Online: rollback netcode over a WebSocket server, invite links, lobby, bots in empty seats, reconnect~~
 3. ~~Content: revenge mode, maps with hazards, more power-ups, 2v2 teams, room settings~~
-4. **Feel:** sound, gamepads, smoothing for small rollback corrections, session scores
+4. ~~Feel: sound, gamepads, smoothing for small rollback corrections, session scores~~
 5. ~~Deploy: Render (Singapore) with CI, like Critter Catch~~

@@ -3,7 +3,7 @@
 // The server is the clock: it simulates tick t with whatever inputs it has for t, and broadcasts them.
 // Clients run a little ahead of it, guess everyone else's input (same as last confirmed),
 // and rewind + replay when the confirmed inputs turn out different.
-import { tickGame, type Game } from "./sim.ts";
+import { TILE, tickGame, type Game } from "./sim.ts";
 
 const MAX_LEAD = 120; // server ignores inputs stamped more than 2 s ahead
 
@@ -38,6 +38,9 @@ export class Timeline {
   confirmedTick: number;
   rollbacks = 0;
   desyncs = 0;
+  // How far each player jumped because of rewinds (old spot minus corrected spot, in sim units).
+  // The renderer draws them offset by this and eases it to zero, so corrections glide instead of snapping.
+  drift: { x: number; y: number }[];
   private states = new Map<number, Game>(); // state after tick t, kept from the last confirmed tick on
   private confirmed = new Map<number, number[]>();
   private used = new Map<number, number[]>(); // inputs each tick was simulated with
@@ -53,6 +56,7 @@ export class Timeline {
     this.confirmedTick = start.tick;
     this.states.set(start.tick, structuredClone(start));
     this.latest = start.players.map((p) => p.prev);
+    this.drift = start.players.map(() => ({ x: 0, y: 0 }));
   }
 
   setMine(t: number, input: number) {
@@ -83,9 +87,16 @@ export class Timeline {
   advance(target: number) {
     if (this.dirtyFrom <= this.g.tick) {
       const end = this.g.tick;
+      const was = this.g.players.map((p) => [p.x, p.y]);
       this.g = structuredClone(this.states.get(this.dirtyFrom - 1)!);
       this.rollbacks++;
       while (this.g.tick < end) this.step();
+      this.g.players.forEach((p, i) => {
+        const [dx, dy] = [was[i][0] - p.x, was[i][1] - p.y];
+        if (Math.abs(dx) + Math.abs(dy) >= 2 * TILE) return; // bigger jumps (portals, ghosts) just snap
+        this.drift[i].x += dx;
+        this.drift[i].y += dy;
+      });
     }
     this.dirtyFrom = Infinity;
     while (this.g.tick < target) this.step();

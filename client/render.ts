@@ -62,13 +62,13 @@ function drawBelt(ctx: CanvasRenderingContext2D, x: number, y: number, d: number
   ctx.restore();
 }
 
-function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: number) {
+function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: number, nudge = { x: 0, y: 0 }) {
   const p = g.players[id];
   const t = g.tick;
   if (!p.alive && !p.ghost && (t - p.diedAt > 50 || (t >> 2) % 2)) return; // knocked out: blink, then gone until back as a ghost
   if (p.alive && p.invuln && (t >> 2) % 2) return;
-  const x = Math.round(p.x / PX);
-  const y = Math.round(p.y / PX);
+  const x = Math.round((p.x + nudge.x) / PX);
+  const y = Math.round((p.y + nudge.y) / PX);
   const frame = p.moving && g.phase === "play" ? 1 + (Math.floor(t / 9) % 2) : 0;
   ctx.globalAlpha = p.alive ? 1 : p.ghost ? 0.75 : 0.6;
   ctx.drawImage(TRAINERS[seat][p.dir][frame], x - 8, y - 12);
@@ -84,7 +84,8 @@ function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: n
   }
 }
 
-export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[]) {
+// nudge[i]: extra offset for player i, easing out a rollback correction.
+export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], nudge: { x: number; y: number }[] = []) {
   const t = g.tick;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(field, 0, 0);
@@ -125,6 +126,6 @@ export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[]) 
       }
     }
     for (const b of g.bombs) if (Math.floor(b.y / TILE) === r) drawOrb(ctx, b, t);
-    for (const id of byY) if (Math.floor(g.players[id].y / TILE) === r) drawTrainer(ctx, g, id, seats[id] ?? id);
+    for (const id of byY) if (Math.floor(g.players[id].y / TILE) === r) drawTrainer(ctx, g, id, seats[id] ?? id, nudge[id]);
   }
 }

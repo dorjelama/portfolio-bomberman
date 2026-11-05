@@ -65,6 +65,7 @@ test("laggy clients predict, roll back and end up with exactly the server's game
   assert.ok(server.bombs.length + server.players.filter((p) => !p.alive).length + server.round > 1, "the match actually happened");
   for (const c of clients) {
     assert.ok(c.rollbacks > 0, "prediction was wrong sometimes, so rollback was exercised");
+    assert.ok(c.drift.some((d) => d.x || d.y), "corrections were measured for smoothing");
     assert.equal(c.desyncs, 0);
     assert.equal(JSON.stringify(c.settled()), JSON.stringify(server));
   }

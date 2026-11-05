@@ -28,6 +28,11 @@
       h1 { font-size: 14px; margin: 0; color: var(--accent); }
       .hud { display: flex; flex-wrap: wrap; gap: 4px 16px; }
       #score { display: flex; flex-wrap: wrap; gap: 0 12px; }
+      .hud { align-items: center; }
+      .mini { padding: 4px 8px; background: var(--panel); color: var(--ink); border: 2px solid var(--dim); }
+      .mini[aria-pressed="false"] { opacity: 0.5; }
+      #tally { margin: 0; color: var(--accent); }
+      #tally:empty { display: none; }
       .hud .out { opacity: 0.4; }
       #timer.hurry { color: var(--p2); }
       /* Fit the whole board on screen: the stage is as wide as the viewport height allows. */
@@ -74,6 +79,8 @@
         <div class="hud" aria-live="off">
           <span id="score"></span>
           <span id="timer">2:00</span>
+          <button id="soundBtn" class="mini" type="button">Sound on</button>
+          <button id="musicBtn" class="mini" type="button">Music on</button>
         </div>
       </header>
 
@@ -102,6 +109,7 @@
             </div>
             <button id="ready" type="button" hidden>Ready!</button>
             <p id="lobbyNote" class="help" aria-live="polite"></p>
+            <p id="tally"></p>
           </div>
         </section>
       </div>
@@ -109,7 +117,8 @@
       <p class="help">
         <span id="who"></span>
         Move: arrows / WASD. Drop orb: Space / Z. Detonate (Remote): X / Shift.
-        Last trainer standing wins the round; first to 2 rounds wins. At 0:00 the walls close in.
+        Gamepad: D-pad or stick, A drops, B detonates, A / Start = ready.
+        Last trainer (or team) standing wins the round. At 0:00 the walls close in.
       </p>
 
       <section class="panel" aria-label="Power-ups">

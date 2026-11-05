@@ -1,5 +1,6 @@
 import { Timeline } from "../shared/netcode.ts";
-import { ACT, BOMB, CURSES, DOWN, LEFT, MAPS, RIGHT, ROUND_TICKS, TICK_HZ, UP, createGame, type Game } from "../shared/sim.ts";
+import { ACT, BOMB, CURSES, DOWN, LEFT, MAPS, RIGHT, ROUND_TICKS, TICK_HZ, UP, createGame, sideOf, tileAt, type Game } from "../shared/sim.ts";
+import { music, settings as audio, setPref, sfx, unlock } from "./audio.ts";
 import { render } from "./render.ts";
 import { ITEM_TILES, TRAINERS } from "./sprites.ts";
 
@@ -62,6 +63,7 @@ interface Lobby {
   seats: (LobbySeat | null)[];
   bots: boolean;
   settings: { map: number; teams: boolean; winRounds: number };
+  tally: { name: string; wins: number; you: boolean }[];
   countdown: number;
   playing: boolean;
 }
@@ -116,6 +118,7 @@ function onMessage(m: any) {
     showLobby();
   } else if (m.type === "start") {
     tl = new Timeline(m.g, m.you);
+    heard.clear(); // orb ids start again from 1 in a new match
     [roster, me, shown, stale] = [m.roster, m.you, tl.g, false];
     lastSent = m.g.players[m.you]?.prev ?? 0;
     delay = Math.min(4, Math.max(1, Math.round(rtt / TICK_MS / 4))); // more ping, a little more delay, fewer rewinds
@@ -146,6 +149,68 @@ addEventListener("keydown", (e) => {
 });
 addEventListener("keyup", (e) => (held &= ~keyOf(e)));
 addEventListener("blur", () => (held = 0));
+addEventListener("keydown", unlock); // browsers only start audio from a user gesture
+addEventListener("pointerdown", unlock);
+
+// Gamepads: any connected pad plays as you. D-pad or left stick moves, A drops an orb, B / X detonates.
+// In the lobby, A or Start toggles ready.
+const START = 64;
+let padPrev = 0;
+function padInput() {
+  let bits = 0;
+  for (const pad of navigator.getGamepads?.() ?? []) {
+    if (!pad) continue;
+    const b = (i: number) => !!pad.buttons[i]?.pressed;
+    const [ax, ay] = [pad.axes[0] ?? 0, pad.axes[1] ?? 0];
+    if (b(12) || ay < -0.5) bits |= UP;
+    if (b(13) || ay > 0.5) bits |= DOWN;
+    if (b(14) || ax < -0.5) bits |= LEFT;
+    if (b(15) || ax > 0.5) bits |= RIGHT;
+    if (b(0)) bits |= BOMB;
+    if (b(1) || b(2)) bits |= ACT;
+    if (b(9)) bits |= START;
+  }
+  return bits;
+}
+
+// ---------- sounds: worked out from what's drawn, so a rewind never plays one twice ----------
+const heard = new Set<number>(); // orbs we've already played a drop for
+let lastOrbs = new Map<number, number>(); // orb id → tile, as drawn last frame
+let lastAlive: boolean[] = [];
+let lastPhase = "";
+let lastHurry = false;
+let lastKit: number[] = [];
+let lastCurse = 0;
+function listen(g: Game) {
+  for (const b of g.bombs) {
+    if (heard.has(b.id)) continue;
+    heard.add(b.id);
+    (g.players[b.owner]?.alive ? sfx.drop : sfx.lob)();
+  }
+  const orbs = new Map(g.bombs.map((b) => [b.id, tileAt(b.x, b.y)]));
+  if ([...lastOrbs].some(([id, tile]) => !orbs.has(id) && g.fire[tile] > 0)) sfx.boom(); // gone in flames, not just un-predicted
+  lastOrbs = orbs;
+  if (g.players.some((p, i) => lastAlive[i] && !p.alive)) sfx.ko();
+  lastAlive = g.players.map((p) => p.alive);
+
+  if (g.phase !== lastPhase && lastPhase) {
+    if (g.phase === "ready") sfx.ready();
+    else if (g.phase === "play") sfx.go();
+    else if (me >= 0 && g.roundWinner >= 0 && sideOf(g, g.roundWinner) === sideOf(g, me)) sfx.win();
+    else sfx.lose();
+  }
+  lastPhase = g.phase;
+  const hurry = g.phase === "play" && g.roundTick >= ROUND_TICKS;
+  if (hurry && !lastHurry) sfx.hurry();
+  lastHurry = hurry;
+
+  const p = g.players[me];
+  const kit = p ? [p.bombs, p.range, p.speed, +p.kick, +p.remote, +p.shield, +p.pierce, +p.napalm] : [];
+  if (p?.alive && kit.some((v, i) => v > lastKit[i])) sfx.pickup();
+  lastKit = kit;
+  if (p?.curse && !lastCurse) sfx.curse();
+  lastCurse = p?.curse ?? 0;
+}
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) return send({ type: "sync" });
   // Going to the background: stop walking (the server would repeat our last input) and stop simulating.
@@ -169,7 +234,21 @@ const winsPick = $<HTMLSelectElement>("wins");
 mapPick.append(...["Random", ...MAPS].map((name, i) => new Option(name, String(i - 1))));
 mapPick.onchange = modePick.onchange = winsPick.onchange = () =>
   send({ type: "settings", map: Number(mapPick.value), teams: modePick.value === "teams", winRounds: Number(winsPick.value) });
-$("ready").onclick = () => send({ type: "ready", ready: !lobby?.seats.find((s) => s?.you)?.ready });
+const toggleReady = () => send({ type: "ready", ready: !lobby?.seats.find((s) => s?.you)?.ready });
+$("ready").onclick = toggleReady;
+for (const k of ["sound", "music"] as const) {
+  const btn = $(`${k}Btn`);
+  const show = () => {
+    btn.textContent = `${k === "sound" ? "Sound" : "Music"} ${audio[k] ? "on" : "off"}`;
+    btn.setAttribute("aria-pressed", String(audio[k]));
+  };
+  show();
+  btn.onclick = () => {
+    setPref(k, !audio[k]);
+    show();
+    btn.blur(); // so the arrow keys go back to the game
+  };
+}
 $("copy").onclick = async () => {
   try {
     await navigator.clipboard.writeText(location.href);
@@ -205,6 +284,7 @@ function showLobby() {
     })
   );
   $<HTMLInputElement>("bots").checked = l.bots;
+  $("tally").textContent = l.tally.length ? `Tonight: ${l.tally.map((e) => `${e.you ? "You" : e.name} ${e.wins}`).join(" · ")}` : "";
   mapPick.value = String(l.settings.map);
   modePick.value = l.settings.teams ? "teams" : "ffa";
   winsPick.value = String(l.settings.winRounds);
@@ -292,6 +372,10 @@ function hud() {
 
 // ---------- loop ----------
 function frame(now: number) {
+  const pad = padInput();
+  const padPressed = pad & ~padPrev;
+  padPrev = pad;
+  if (padPressed & (BOMB | START) && connected && lobby && !lobby.playing) toggleReady();
   if (tl && offset !== null && !stale) {
     // Run far enough ahead of the server that our inputs reach it before it simulates their tick.
     const target = Math.floor(now / TICK_MS + offset + rtt / TICK_MS + MARGIN - delay);
@@ -303,7 +387,7 @@ function frame(now: number) {
     while (tl.g.tick < target && steps++ < MAX_STEPS) {
       const t = tl.g.tick + 1;
       if (me >= 0) {
-        const input = held | tapped;
+        const input = (held | tapped | pad) & ~START;
         tapped = 0;
         tl.setMine(t + delay, input);
         if (input !== lastSent) send({ type: "in", t: t + delay, i: (lastSent = input) });
@@ -312,8 +396,14 @@ function frame(now: number) {
     }
     if (!steps) tl.advance(tl.g.tick); // still apply any corrections that came in
     shown = tl.g;
+    listen(shown);
+    for (const d of tl.drift) {
+      d.x *= 0.8; // ease rollback corrections out over a few frames
+      d.y *= 0.8;
+    }
   }
-  render(ctx, shown, seats());
+  music(!!tl && audio.music);
+  render(ctx, shown, seats(), tl?.drift);
   hud();
   requestAnimationFrame(frame);
 }
