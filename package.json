@@ -1,0 +1,27 @@
+{
+  "name": "boom-orbs",
+  "private": true,
+  "version": "0.1.0",
+  "description": "4-player online bomb-maze brawl set in the Critter Catch world",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch server/dev.ts",
+    "build": "esbuild client/main.ts --bundle --format=esm --minify --outfile=public/main.js && esbuild server/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
+    "start": "node dist/server.js",
+    "check": "tsc",
+    "test": "node --import tsx --test shared/sim.test.ts shared/netcode.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "ws": "^8.22.1"
+  }
+}

@@ -1,0 +1,11 @@
+# Render Blueprint: New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: boom-orbs
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build # esbuild is a dev dependency
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: false # deploys are triggered by .github/workflows/ci.yml after the checks pass
