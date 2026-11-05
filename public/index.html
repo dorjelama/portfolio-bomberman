@@ -55,9 +55,11 @@
       #seats img { width: 32px; height: 32px; image-rendering: pixelated; flex: none; }
       #seats span { flex: 1; overflow-wrap: anywhere; }
       #seats button { padding: 6px 8px; }
+      #lobby .settings { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+      select { font: inherit; padding: 6px; background: var(--bg); color: var(--ink); border: 2px solid var(--dim); }
       input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
       button { font: inherit; background: var(--accent); color: var(--bg); border: 0; padding: 10px 12px; cursor: pointer; }
-      button:focus-visible, input:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+      button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
       .help { color: var(--dim); margin: 0; }
       .p1 { color: var(--p1); }
       .p2 { color: var(--p2); }
@@ -89,6 +91,15 @@
             <label>Your name <input id="name" maxlength="12" autocomplete="nickname" placeholder="Trainer" /></label>
             <ol id="seats"></ol>
             <label><input type="checkbox" id="bots" /> Fill empty seats with bots</label>
+            <div class="settings">
+              <label>Map <select id="map"></select></label>
+              <label>Mode
+                <select id="mode"><option value="ffa">Free-for-all</option><option value="teams">2v2 teams</option></select>
+              </label>
+              <label>First to
+                <select id="wins"><option>1</option><option>2</option><option>3</option><option>5</option></select>
+              </label>
+            </div>
             <button id="ready" type="button" hidden>Ready!</button>
             <p id="lobbyNote" class="help" aria-live="polite"></p>
           </div>

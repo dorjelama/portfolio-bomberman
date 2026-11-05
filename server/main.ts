@@ -7,7 +7,7 @@ import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { botInput } from "../shared/bot.ts";
 import { InputQueue } from "../shared/netcode.ts";
-import { TICK_HZ, createGame, tickGame, type Game } from "../shared/sim.ts";
+import { MAPS, TICK_HZ, createGame, tickGame, type Game } from "../shared/sim.ts";
 
 const PORT = Number(process.env.PORT) || 8000;
 const SEATS = 4;
@@ -48,10 +48,16 @@ interface Seat {
   client: Client | null;
   queue: InputQueue;
 }
+interface Settings {
+  map: number; // -1 = random each round
+  teams: boolean; // 2v2: seats 1 + 3 against 2 + 4
+  winRounds: number;
+}
 interface Room {
   code: string;
   clients: Client[];
   bots: boolean;
+  settings: Settings;
   countdown: number; // ticks left, 0 = not counting down
   game: Game | null;
   roster: Seat[]; // sim player i = roster[i]
@@ -76,6 +82,7 @@ function sendLobby(room: Room) {
         return o ? { name: o.name, ready: o.ready, you: o === c } : null;
       }),
       bots: room.bots,
+      settings: room.settings,
       countdown: Math.ceil(room.countdown / TICK_HZ),
       playing: !!room.game,
     });
@@ -87,8 +94,9 @@ const sendStart = (room: Room, c: Client) =>
 
 function canStart(room: Room) {
   const seated = room.clients.filter((c) => c.seat >= 0);
-  const players = room.bots ? SEATS : seated.length;
-  return seated.length > 0 && seated.every((c) => c.ready) && players >= 2;
+  const seats = room.bots ? [0, 1, 2, 3] : seated.map((c) => c.seat);
+  const bothTeams = new Set(seats.map((s) => s % 2)).size === 2;
+  return seated.length > 0 && seated.every((c) => c.ready) && seats.length >= 2 && (!room.settings.teams || bothTeams);
 }
 
 function startMatch(room: Room) {
@@ -97,7 +105,12 @@ function startMatch(room: Room) {
     const c = room.clients.find((x) => x.seat === s) ?? null;
     if (c || room.bots) room.roster.push({ seat: s, name: c ? c.name : `Bot ${s + 1}`, bot: !c, client: c, queue: new InputQueue() });
   }
-  room.game = createGame(room.roster.length, randomBytes(4).readInt32LE());
+  const { map, teams, winRounds } = room.settings;
+  room.game = createGame(room.roster.length, randomBytes(4).readInt32LE(), {
+    map,
+    winRounds,
+    teams: teams ? room.roster.map((r) => r.seat % 2) : null,
+  });
   room.countdown = 0;
   for (const c of room.clients) sendStart(room, c);
   sendLobby(room);
@@ -192,6 +205,12 @@ function handle(room: Room, c: Client, m: Record<string, unknown>) {
   } else if (m.type === "bots") {
     room.bots = m.on === true;
     sendLobby(room);
+  } else if (m.type === "settings") {
+    const { map, teams, winRounds } = m;
+    if (!Number.isInteger(map) || (map as number) < -1 || (map as number) >= MAPS.length) return;
+    if (!Number.isInteger(winRounds) || (winRounds as number) < 1 || (winRounds as number) > 5) return;
+    room.settings = { map: map as number, teams: teams === true, winRounds: winRounds as number };
+    sendLobby(room);
   }
 }
 
@@ -199,7 +218,10 @@ wss.on("connection", (ws, req) => {
   const code = new URL(req.url ?? "", "http://x").searchParams.get("room")?.toLowerCase() ?? "";
   if (!/^[a-z0-9]{4,8}$/.test(code)) return ws.close(1008, "bad room");
   let room = rooms.get(code);
-  if (!room) rooms.set(code, (room = { code, clients: [], bots: true, countdown: 0, game: null, roster: [] }));
+  if (!room) {
+    room = { code, clients: [], bots: true, settings: { map: -1, teams: false, winRounds: 2 }, countdown: 0, game: null, roster: [] };
+    rooms.set(code, room);
+  }
   const r = room;
   let me: Client | null = null;
   ws.on("message", (data) => {

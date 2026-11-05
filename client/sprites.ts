@@ -156,7 +156,7 @@ const STONE = [
   "kkkkkkkkkkkkkkkk",
 ];
 
-// Power-up icons, indexed by item id in shared/sim.ts (1 = Orb+ … 6 = Remote).
+// Power-up icons, indexed by item id in shared/sim.ts (1 = Orb+ … 9 = Skull).
 const ICONS = [
   [],
   ["....kYk...", "....kbk...", "..kkkkkk..", ".kNwnnnnk.", "kNwnnnnnnk", "kcccccccck", "knnnnnnnnk", ".knnnnnnk.", "..kkkkkk..", ".........."],
@@ -165,6 +165,65 @@ const ICONS = [
   ["..kkkk....", "..kbbk....", "..kbbk....", "..kbbk....", "..kbbbk...", "..kbbbbkk.", ".kobbbbbbk", ".kbbbbbbbk", ".kkkkkkkkk", ".........."],
   ["kkkkkkkkkk", "kwtttotttk", "kttttotttk", "ktoooooook", "kttttotttk", ".ktttottk.", ".ktttottk.", "..kttttk..", "...kttk...", "....kk...."],
   ["......kYk.", ".......k..", "..kkkkkkk.", "..kRRRRRk.", "..kRcccRk.", "..kRcwcRk.", "..kRcccRk.", "..kRRRRRk.", "..krRrRrk.", "..kkkkkkk."],
+  ["....k.....", "....kk....", "....kck...", "kkkkkcck..", "kccccccck.", "kccccccck.", "kkkkkcck..", "....kck...", "....kk....", "....k....."],
+  ["....kk....", "...kcck...", "...kcck...", "..kccock..", ".kccoocck.", ".kcooYock.", ".kcoYYock.", ".kccoocck.", "..kcccck..", "...kkkk..."],
+  ["..kkkkkk..", ".kwwwwwwk.", "kwwwwwwwwk", "kwkkwwkkwk", "kwkkwwkkwk", "kwwwwkwwwk", ".kwwwwwwk.", "..kwkwkwk.", "..kkkkkkk.", ".........."],
+];
+
+// Ground for the special maps: ice, a conveyor segment (drawn pointing right; rotated per direction), a portal.
+const ICE_TILE = [
+  "IIIIIIIIIIIIIIII",
+  "IiiIIIIIIIIIIIII",
+  "IiIIIIIIIIIIIIII",
+  "IIIIIIIIIIIIIIII",
+  "IIIIIIIIIIIiIIII",
+  "IIIIIIIIIIiIIIII",
+  "IIIIIIIIIiIIIIII",
+  "IIIIIIIIIIIIIIII",
+  "IIIIIIIIIIIIIIII",
+  "IIIIIIIIIIIIIIII",
+  "IIIiIIIIIIIIIIII",
+  "IIiIIIIIIIIIIIII",
+  "IIIIIIIIIIIIIIII",
+  "IIIIIIIIIIIIIiiI",
+  "IIIIIIIIIIIIIIiI",
+  "IIIIIIIIIIIIIIIJ",
+];
+const BELT_TILE = [
+  "kkkkkkkkkkkkkkkk",
+  "rrrrrrrrrrrrrrrr",
+  "RRRRRRRRRRRRRRRR",
+  "RRRRYRRRRRRRYRRR",
+  "RRRRYYRRRRRRYYRR",
+  "RRRRRYYRRRRRRYYR",
+  "RRRRRRYYRRRRRRYY",
+  "RRRRRRRYYRRRRRRY",
+  "RRRRRRRYYRRRRRRY",
+  "RRRRRRYYRRRRRRYY",
+  "RRRRRYYRRRRRRYYR",
+  "RRRRYYRRRRRRYYRR",
+  "RRRRYRRRRRRRYRRR",
+  "RRRRRRRRRRRRRRRR",
+  "rrrrrrrrrrrrrrrr",
+  "kkkkkkkkkkkkkkkk",
+];
+const PORTAL_TILE = [
+  "................",
+  ".....kkkkkk.....",
+  "...kkPPPPPPkk...",
+  "..kPPppppppPPk..",
+  ".kPppNNNNNNppPk.",
+  ".kPpNNnnnnNNpPk.",
+  "kPpNNnnwwnnNNpPk",
+  "kPpNnnwwwwnnNpPk",
+  "kPpNnnwwwwnnNpPk",
+  "kPpNNnnwwnnNNpPk",
+  ".kPpNNnnnnNNpPk.",
+  ".kPppNNNNNNppPk.",
+  "..kPPppppppPPk..",
+  "...kkPPPPPPkk...",
+  ".....kkkkkk.....",
+  "................",
 ];
 
 // Draws a grid to its own canvas once, so the game loop only blits images.
@@ -208,3 +267,14 @@ export const BUSHES = [toCanvas(BUSH), toCanvas(BUSH, { g: "#8a8a7a", G: "#b0b0a
 export const PILLAR = toCanvas(STONE, { W: "#d6dbe0" });
 export const BORDER = toCanvas(STONE, { W: "#8a8f96", R: "#6b7177", r: "#44484e" });
 export const ITEM_TILES = ICONS.map((icon) => (icon.length ? itemTile(icon) : null));
+
+// Rotate a grid a quarter turn clockwise.
+const turn = (rows: string[]) => [...rows[0]].map((_, x) => rows.map((r) => r[x]).reverse().join(""));
+const beltRight = BELT_TILE;
+const beltDown = turn(beltRight);
+const beltLeft = turn(beltDown);
+const beltUp = turn(beltLeft);
+export const ICE_IMG = toCanvas(ICE_TILE, { I: "#bfe6f5", i: "#ffffff", J: "#9fd0e6" });
+export const BELTS = [beltUp, beltDown, beltLeft, beltRight].map((rows) => toCanvas(rows)); // by sim direction
+export const PORTAL_IMG = toCanvas(PORTAL_TILE);
+export const CURSE_MARK = toCanvas(ICONS[9]);

@@ -1,6 +1,6 @@
 // Draws one game state. seats[i] is sim player i's seat, which picks their colours.
-import { BLOCK, COLS, CRUMBLE, FLAME, FLOOR, ROWS, TILE, WALL, isPillar, type Bomb, type Game } from "../shared/sim.ts";
-import { BORDER, BUSHES, COLORS, ITEM_TILES, ORBS, PILLAR, TRAINERS } from "./sprites.ts";
+import { BELT, BLOCK, COLS, CRUMBLE, FLAME, FLOOR, ICE, PORTAL, ROWS, TILE, WALL, isPillar, type Bomb, type Game } from "../shared/sim.ts";
+import { BELTS, BORDER, BUSHES, COLORS, CURSE_MARK, ICE_IMG, ITEM_TILES, ORBS, PILLAR, PORTAL_IMG, TRAINERS } from "./sprites.ts";
 
 const PX = TILE / 16; // sim units per screen pixel
 
@@ -49,19 +49,33 @@ function drawOrb(ctx: CanvasRenderingContext2D, b: Bomb, t: number) {
   }
 }
 
+// Conveyor: the chevrons scroll in the belt's direction.
+function drawBelt(ctx: CanvasRenderingContext2D, x: number, y: number, d: number, t: number) {
+  const s = (t >> 2) % 16;
+  const [dx, dy] = [[0, -s], [0, s], [-s, 0], [s, 0]][d];
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, 16, 16);
+  ctx.clip();
+  ctx.drawImage(BELTS[d], x + dx, y + dy);
+  ctx.drawImage(BELTS[d], x + dx - Math.sign(dx) * 16, y + dy - Math.sign(dy) * 16);
+  ctx.restore();
+}
+
 function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: number) {
   const p = g.players[id];
   const t = g.tick;
-  if (!p.alive && (t - p.diedAt > 50 || (t >> 2) % 2)) return; // knocked out: blink, then gone
+  if (!p.alive && !p.ghost && (t - p.diedAt > 50 || (t >> 2) % 2)) return; // knocked out: blink, then gone until back as a ghost
   if (p.alive && p.invuln && (t >> 2) % 2) return;
   const x = Math.round(p.x / PX);
   const y = Math.round(p.y / PX);
   const frame = p.moving && g.phase === "play" ? 1 + (Math.floor(t / 9) % 2) : 0;
-  ctx.globalAlpha = p.alive ? 1 : 0.6;
+  ctx.globalAlpha = p.alive ? 1 : p.ghost ? 0.75 : 0.6;
   ctx.drawImage(TRAINERS[seat][p.dir][frame], x - 8, y - 12);
   ctx.globalAlpha = 1;
   ctx.fillStyle = COLORS[seat];
   ctx.fillRect(x - 3, y - 15, 6, 2);
+  if (p.curse && (t >> 3) % 2) ctx.drawImage(CURSE_MARK, x - 5, y - 27);
   if (p.shield) {
     ctx.strokeStyle = "rgb(63 208 203 / 0.8)";
     ctx.beginPath();
@@ -75,9 +89,18 @@ export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[]) 
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(field, 0, 0);
   for (let i = COLS; i < g.grid.length; i++) {
-    if (g.grid[i] !== FLOOR) continue;
+    if (g.grid[i] === WALL) continue;
     const x = (i % COLS) * 16;
     const y = Math.floor(i / COLS) * 16;
+    const ground = g.floor[i];
+    if (ground === ICE) ctx.drawImage(ICE_IMG, x, y);
+    else if (ground >= BELT && ground < BELT + 4) drawBelt(ctx, x, y, ground - BELT, t);
+    else if (ground === PORTAL) {
+      ctx.globalAlpha = 0.75 + 0.25 * Math.sin(t / 10);
+      ctx.drawImage(PORTAL_IMG, x, y);
+      ctx.globalAlpha = 1;
+    }
+    if (g.grid[i] !== FLOOR) continue;
     if (g.grid[i - COLS] !== FLOOR) {
       ctx.fillStyle = "rgb(0 0 0 / 0.22)"; // shadow of the tile above
       ctx.fillRect(x, y, 16, 4);

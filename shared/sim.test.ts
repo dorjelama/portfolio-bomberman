@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
-  ACT, BLOCK, BOMB, COLS, CRUMBLE, DOWN, END_GRACE, FLAME, FLOOR, FUSE, OVER_TICKS, RIGHT, ROUND_TICKS, SHRINK_EVERY,
-  SPAWNS, SPIRAL, WALL, center, createGame, tickGame, type Game,
+  ACT, BLOCK, BOMB, BUTTERFINGERS, COLS, CRUMBLE, DOWN, END_GRACE, FLAME, FLOOR, FUSE, GHOST_DELAY, NAPALM_FLAME, OVER_TICKS,
+  REVERSED, RIGHT, ROUND_TICKS, SHRINK_EVERY, SPAWNS, SPIRAL, WALL, center, createGame, tickGame, tileAt, type Bomb, type Game,
+  type Options,
 } from "./sim.ts";
 
 const idx = (c: number, r: number) => r * COLS + c;
@@ -11,10 +12,14 @@ const run = (g: Game, ticks: number, inputs: number[] = []) => {
   for (let i = 0; i < ticks; i++) tickGame(g, inputs);
 };
 const place = (g: Game, id: number, c: number, r: number) => Object.assign(g.players[id], { x: center(c), y: center(r) });
+const orb = (owner: number, c: number, r: number, extra: Partial<Bomb> = {}): Bomb => ({
+  id: 900 + owner, owner, x: center(c), y: center(r), fuse: 999, range: 1, remote: false, pierce: false, flame: FLAME, dx: 0, dy: 0, ...extra,
+});
+const MIXED: Partial<Options> = { map: -1, teams: [0, 1, 0, 1] }; // random map each round, 2v2
 
 // No breakable blocks and the round already running, so each test controls the whole board.
-function arena(players = 2) {
-  const g = createGame(players, 1);
+function arena(players = 2, opts: Partial<Options> = {}) {
+  const g = createGame(players, 1, opts);
   g.grid = g.grid.map((t) => (t === BLOCK ? FLOOR : t));
   g.phase = "play";
   return g;
@@ -33,14 +38,14 @@ test("a new round has border walls, pillars, blocks and open spawn corners", () 
 });
 
 test("same seed + same inputs replay identically, and a saved state resumes identically (rollback)", () => {
-  const a = createGame(4, 42);
+  const a = createGame(4, 42, MIXED);
   const log: number[][] = [];
   for (let t = 0; t < 4000; t++) {
     const inputs = a.players.map((_, id) => botInput(a, id));
     log.push(inputs);
     tickGame(a, inputs);
   }
-  const b = createGame(4, 42);
+  const b = createGame(4, 42, MIXED);
   let saved: Game | null = null;
   log.forEach((inputs, t) => {
     if (t === 2000) saved = structuredClone(b);
@@ -76,7 +81,7 @@ test("an orb explodes after its fuse: breaks blocks, knocks players out and chai
   tickGame(g, [BOMB]);
   assert.equal(g.bombs.length, 1);
   place(g, 0, 5, 5);
-  g.bombs.push({ id: 99, owner: 1, x: center(1), y: center(3), fuse: 999, range: 1, remote: false, dx: 0, dy: 0 });
+  g.bombs.push(orb(1, 1, 3));
 
   run(g, FUSE - 2);
   assert.equal(g.bombs.length, 2);
@@ -94,7 +99,7 @@ test("a shield soaks one blast", () => {
   const g = arena();
   place(g, 1, 2, 1);
   g.players[1].shield = true;
-  g.bombs.push({ id: 1, owner: 0, x: center(1), y: center(1), fuse: 1, range: 2, remote: false, dx: 0, dy: 0 });
+  g.bombs.push(orb(0, 1, 1, { fuse: 1, range: 2 }));
   tickGame(g, []);
   assert.equal(g.players[1].alive, true);
   assert.equal(g.players[1].shield, false);
@@ -105,7 +110,7 @@ test("kick sends an orb sliding until something stops it", () => {
   const g = arena();
   place(g, 0, 1, 1);
   g.players[0].kick = true;
-  g.bombs.push({ id: 1, owner: 1, x: center(2), y: center(1), fuse: 999, range: 1, remote: false, dx: 0, dy: 0 });
+  g.bombs.push(orb(1, 2, 1));
   run(g, 100, [RIGHT]);
   assert.equal(g.bombs[0].x, center(COLS - 2));
   assert.equal(g.bombs[0].dx, 0);
@@ -157,4 +162,95 @@ test("four bots finish a round on their own", () => {
   let t = 0;
   while (g.round === 1 && g.phase !== "over" && t++ < 20000) tickGame(g, g.players.map((_, id) => botInput(g, id)));
   assert.ok(g.round > 1 || g.phase === "over", `round still running after ${t} ticks`);
+});
+
+test("revenge: a knocked-out player rides the rim and lobs orbs inward, one at a time", () => {
+  const g = arena(3);
+  place(g, 0, 1, 3); // nearest wall: the left one
+  g.bombs.push(orb(2, 1, 3, { fuse: 1 }));
+  tickGame(g, []);
+  const p = g.players[0];
+  assert.equal(p.alive, false);
+  run(g, GHOST_DELAY);
+  assert.ok(p.ghost);
+  assert.deepEqual([p.x, p.y], [center(0), center(3)]);
+  run(g, 20, [DOWN]);
+  assert.equal(p.x, center(0), "stays on the wall");
+  assert.ok(p.y > center(3));
+
+  Object.assign(p, { x: center(0), y: center(5) });
+  tickGame(g, [BOMB]);
+  const thrown = g.bombs.filter((b) => b.owner === 0);
+  assert.equal(thrown.length, 1);
+  assert.equal(tileAt(thrown[0].x, thrown[0].y), idx(3, 5));
+  tickGame(g, []);
+  tickGame(g, [BOMB]);
+  assert.equal(g.bombs.filter((b) => b.owner === 0).length, 1, "only one revenge orb at a time");
+});
+
+test("Pierce blasts carry on through bushes; Napalm fire burns longer", () => {
+  for (const pierce of [false, true]) {
+    const g = arena();
+    place(g, 0, 7, 7);
+    g.grid[idx(3, 1)] = g.grid[idx(4, 1)] = BLOCK;
+    g.bombs.push(orb(0, 1, 1, { fuse: 1, range: 4, pierce }));
+    tickGame(g, []);
+    assert.equal(g.grid[idx(3, 1)], CRUMBLE);
+    assert.equal(g.grid[idx(4, 1)], pierce ? CRUMBLE : BLOCK);
+    assert.equal(g.fire[idx(5, 1)] > 0, pierce);
+  }
+  const g = arena();
+  place(g, 0, 7, 7);
+  g.bombs.push(orb(0, 1, 1, { fuse: 1, flame: NAPALM_FLAME }));
+  run(g, FLAME + 10);
+  assert.ok(g.fire[idx(1, 2)] > 0);
+});
+
+test("Skull curses: reversed controls, butterfingers, and the curse jumps to whoever you touch", () => {
+  const g = arena();
+  place(g, 0, 3, 3);
+  place(g, 1, 7, 7);
+  Object.assign(g.players[0], { curse: REVERSED, curseLeft: 999 });
+  run(g, 10, [RIGHT]);
+  assert.ok(g.players[0].x < center(3), "right walks left");
+
+  place(g, 1, 3, 3); // walk into someone
+  tickGame(g, []);
+  assert.equal(g.players[1].curse, REVERSED);
+  assert.equal(g.players[0].curse, 0);
+  tickGame(g, []);
+  assert.equal(g.players[0].curse, 0, "can't bounce straight back");
+
+  Object.assign(g.players[0], { curse: BUTTERFINGERS, curseLeft: 999 });
+  place(g, 0, 9, 9);
+  tickGame(g, []);
+  assert.equal(g.bombs.filter((b) => b.owner === 0).length, 1, "drops an orb without pressing anything");
+});
+
+test("maps: ice keeps you sliding, belts push you, portals swap you across", () => {
+  const ice = arena(2, { map: 1 });
+  place(ice, 0, 3, 3);
+  run(ice, 3, [RIGHT]);
+  run(ice, 60, []);
+  assert.ok(ice.players[0].x > center(5), "still sliding with no keys held");
+
+  const belts = arena(2, { map: 2 });
+  place(belts, 0, 3, 5);
+  run(belts, 30, []);
+  assert.ok(belts.players[0].x > center(3) + 200);
+
+  const portals = arena(2, { map: 3 });
+  place(portals, 0, 2, 3);
+  run(portals, 15, [RIGHT]);
+  assert.equal(tileAt(portals.players[0].x, portals.players[0].y), idx(11, 9));
+});
+
+test("teams: the round ends when one team is left, and both teammates score", () => {
+  const g = arena(4, { teams: [0, 1, 0, 1], winRounds: 3 });
+  run(g, 5);
+  assert.equal(g.endAt, -1);
+  g.players[1].alive = g.players[3].alive = false;
+  run(g, END_GRACE + 1);
+  assert.equal(g.phase, "result");
+  assert.deepEqual(g.players.map((p) => p.wins), [1, 0, 1, 0]);
 });

@@ -2,7 +2,12 @@
 
 A 4-player online bomb-maze brawl set in the Critter Catch world, made for playing with friends in the browser. Drop orbs, break bushes, grab power-ups, and be the last trainer standing. At 0:00 the walls close in.
 
-**Status: milestone 2.** It's online: invite links, a lobby, and rollback netcode, with bots filling empty seats.
+**Status: milestone 3.** It's online, with invite links, a lobby and rollback netcode; bots fill empty seats.
+
+- **Maps:** Meadow; Ice Rink (you slide until you hit something); Factory (conveyor belts); Portal Garden (two linked pairs). Pick one in the lobby, or Random for a new map each round.
+- **Modes:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
+- **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one at a time). Nobody sits out.
+- **Power-ups:** Orb+, Fire+, Speed+, Kick, Shield, Remote, Pierce (blasts through bushes), Napalm (2 s fire), and Skull (a random 10 s curse: reversed, sluggish, butterfingers or fizzle, passed on by touch).
 
 ## Run it
 
@@ -66,6 +71,6 @@ Rooms live in memory in one process, so a deploy or restart ends any match in pr
 
 1. ~~Offline game: rules, bots, 6 power-ups, shrinking arena~~
 2. ~~Online: rollback netcode over a WebSocket server, invite links, lobby, bots in empty seats, reconnect~~
-3. **Content:** revenge mode for knocked-out players, more maps with hazards, more power-ups, 2v2 teams, host settings
+3. ~~Content: revenge mode, maps with hazards, more power-ups, 2v2 teams, room settings~~
 4. **Feel:** sound, gamepads, smoothing for small rollback corrections, session scores
 5. ~~Deploy: Render (Singapore) with CI, like Critter Catch~~

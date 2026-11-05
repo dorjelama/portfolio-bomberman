@@ -1,17 +1,25 @@
 // Bot players. A bot only produces input bits, like a keyboard, so it needn't be deterministic:
-// online, the server will run bots and send their inputs to everyone like any other player's.
-import { ACT, BLOCK, BOMB, COLS, FLOOR, ROUND_TICKS, SPIRAL, TICK_HZ, tileAt, type Game } from "./sim.ts";
+// the server runs bots and sends their inputs to everyone like any other player's.
+import {
+  ACT, BLOCK, BOMB, COLS, DOWN, FLOOR, LEFT, RIGHT, ROUND_TICKS, ROWS, SPIRAL, TICK_HZ, TILE, UP, WALL, sideOf, tileAt,
+  type Game,
+} from "./sim.ts";
 
 const STEPS = [-COLS, COLS, -1, 1]; // tile-index offsets for up, down, left, right (input bits 1, 2, 4, 8)
 const ESCAPE_TILES = 5; // how far a bot will run from its own orb before the fuse ends
+const GHOST_THROW_CHANCE = 0.05; // per tick once lined up, so people get a moment to react
 
 // Tiles an explosion from `from` would reach. Mirrors explode() in sim.ts.
-function blast(g: Game, from: number, range: number, bombs: Set<number>, out: Uint8Array) {
+function blast(g: Game, from: number, range: number, bombs: Set<number>, out: Uint8Array, pierce = false) {
   out[from] = 1;
   for (const s of STEPS) {
-    for (let k = 1, i = from + s; k <= range && g.grid[i] === FLOOR; k++, i += s) {
+    for (let k = 1, i = from + s; k <= range && g.grid[i] !== WALL; k++, i += s) {
+      if (g.grid[i] !== FLOOR) {
+        if (pierce) continue;
+        break;
+      }
       out[i] = 1;
-      if (g.items[i] || bombs.has(i)) break;
+      if ((g.items[i] || bombs.has(i)) && !pierce) break;
     }
   }
 }
@@ -19,7 +27,7 @@ function blast(g: Game, from: number, range: number, bombs: Set<number>, out: Ui
 function dangerMap(g: Game, bombs: Set<number>) {
   const d = new Uint8Array(g.grid.length);
   g.fire.forEach((f, i) => f && (d[i] = 1));
-  for (const b of g.bombs) blast(g, tileAt(b.x, b.y), b.range, bombs, d);
+  for (const b of g.bombs) blast(g, tileAt(b.x, b.y), b.range, bombs, d, b.pierce);
   if (g.roundTick >= ROUND_TICKS - TICK_HZ) for (const i of SPIRAL.slice(g.shrink, g.shrink + 15)) d[i] = 1;
   return d;
 }
@@ -49,21 +57,39 @@ function firstStep(start: number, blocked: (i: number) => boolean, goal: (i: num
   return -1;
 }
 
+const enemies = (g: Game, id: number) => g.players.filter((q, j) => q.alive && sideOf(g, j) !== sideOf(g, id));
+
 // Is an orb at `at` worth dropping: would it hit a block or an opponent?
 function worth(g: Game, id: number, at: number, range: number) {
+  const foes = new Set(enemies(g, id).map((q) => tileAt(q.x, q.y)));
   for (const s of STEPS) {
     for (let k = 1, i = at + s; k <= range; k++, i += s) {
-      if (g.grid[i] === BLOCK) return true;
+      if (g.grid[i] === BLOCK || foes.has(i)) return true;
       if (g.grid[i] !== FLOOR || g.items[i]) break;
-      if (g.players.some((q, j) => j !== id && q.alive && tileAt(q.x, q.y) === i)) return true;
     }
   }
   return false;
 }
 
+// A knocked-out bot rides the rim towards the nearest opponent's row or column and lobs an orb in.
+function haunt(g: Game, id: number) {
+  const p = g.players[id];
+  const c = Math.floor(p.x / TILE);
+  const r = Math.floor(p.y / TILE);
+  const horiz = r === 0 || r === ROWS - 1; // on the top or bottom wall: run left/right
+  const pos = horiz ? c : r;
+  const lines = enemies(g, id).map((q) => (horiz ? Math.floor(q.x / TILE) : Math.floor(q.y / TILE)));
+  if (!lines.length) return 0;
+  const best = lines.sort((a, b) => Math.abs(a - pos) - Math.abs(b - pos))[0];
+  if (best !== pos) return horiz ? (best < pos ? LEFT : RIGHT) : best < pos ? UP : DOWN;
+  const canThrow = !(p.prev & BOMB) && !g.bombs.some((b) => b.owner === id);
+  return canThrow && Math.random() < GHOST_THROW_CHANCE ? BOMB : 0;
+}
+
 export function botInput(g: Game, id: number): number {
   const p = g.players[id];
-  if (g.phase !== "play" || !p.alive) return 0;
+  if (g.phase !== "play") return 0;
+  if (!p.alive) return p.ghost ? haunt(g, id) : 0;
   const here = tileAt(p.x, p.y);
   const bombs = new Set(g.bombs.map((b) => tileAt(b.x, b.y)));
   const danger = dangerMap(g, bombs);
@@ -77,7 +103,7 @@ export function botInput(g: Game, id: number): number {
 
   if (!(p.prev & BOMB) && mine.length < p.bombs && !bombs.has(here) && worth(g, id, here, p.range)) {
     const after = danger.slice();
-    blast(g, here, p.range, bombs, after);
+    blast(g, here, p.range, bombs, after, p.pierce);
     if (firstStep(here, blocked, (i) => !after[i], ESCAPE_TILES) >= 0) return BOMB;
   }
 

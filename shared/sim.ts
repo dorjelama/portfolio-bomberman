@@ -1,6 +1,6 @@
-// Game rules, shared by the browser and (from milestone 2) the server.
+// Game rules, shared by the browser and the server.
 // Pure and deterministic: integer maths, a seeded RNG, a fixed update order and plain JSON state.
-// That is what lets every client re-run the same ticks for rollback netcode later.
+// That is what lets every client re-run the same ticks for rollback netcode.
 
 export const TICK_HZ = 60;
 export const COLS = 15;
@@ -11,16 +11,23 @@ const LEAN = TILE / 4; // corner assist: within this distance of the next lane y
 
 export const FUSE = 150; // 2.5 s
 export const FLAME = 30;
+export const NAPALM_FLAME = 2 * TICK_HZ;
 export const READY_TICKS = 2 * TICK_HZ;
 export const ROUND_TICKS = 120 * TICK_HZ; // 2:00, then the arena starts shrinking
 export const SHRINK_EVERY = 12; // ticks between falling walls
 export const END_GRACE = TICK_HZ; // a trade a moment after the last-but-one dies still counts as a draw
 export const RESULT_TICKS = 3 * TICK_HZ;
 export const OVER_TICKS = 6 * TICK_HZ;
-export const WIN_ROUNDS = 2; // best of 3
+export const WIN_ROUNDS = 2; // default: best of 3
 export const SPEEDS = [12, 15, 18, 21, 24]; // units per tick for each Speed+ level
+const SLUGGISH_SPEED = 7;
+const BELT_SPEED = 8;
 export const KICK_SPEED = 32;
 export const INVULN = 90; // after a shield breaks
+export const GHOST_DELAY = TICK_HZ; // after a knockout, before you're back on the rim
+const THROW = 3; // a revenge orb lands this many tiles in from the rim (further if that tile is taken)
+export const CURSE_TICKS = 10 * TICK_HZ;
+const IMMUNE_TICKS = TICK_HZ; // after passing a curse on, so it can't bounce straight back
 export const MAX_BOMBS = 8;
 export const MAX_RANGE = 8;
 const BLOCK_CHANCE = 0.75;
@@ -41,15 +48,42 @@ export const WALL = 1;
 export const BLOCK = 2;
 export const CRUMBLE = 3; // a block that was hit: still solid until its flame dies down
 
+// What's painted on the ground, per map.
+export const GRASS = 0;
+export const ICE = 1;
+export const BELT = 2; // BELT + d is a conveyor moving in direction d (2..5)
+export const PORTAL = 6;
+export const MAPS = ["Meadow", "Ice Rink", "Factory", "Portal Garden"];
+const PORTAL_PAIRS = [
+  [3 * COLS + 3, 9 * COLS + 11],
+  [3 * COLS + 11, 9 * COLS + 3],
+];
+const PARTNER = new Map(PORTAL_PAIRS.flatMap(([a, b]) => [[a, b], [b, a]]));
+
 export const ORB_UP = 1;
 export const FIRE_UP = 2;
 export const SPEED_UP = 3;
 export const KICK = 4;
 export const SHIELD = 5;
 export const REMOTE = 6;
-const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7]; // by item id
+export const PIERCE = 7;
+export const NAPALM = 8;
+export const SKULL = 9;
+const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 10]; // by item id
+
+export const REVERSED = 1;
+export const SLUGGISH = 2;
+export const BUTTERFINGERS = 3; // drops orbs on its own
+export const FIZZLE = 4; // blasts reach one tile
+export const CURSES = ["", "Reversed", "Sluggish", "Butterfingers", "Fizzle"];
 
 export type Phase = "ready" | "play" | "result" | "over";
+
+export interface Options {
+  map: number; // index into MAPS, or -1 for a random map each round
+  winRounds: number;
+  teams: number[] | null; // team per player, or null for free-for-all
+}
 
 export interface Player {
   x: number;
@@ -59,13 +93,19 @@ export interface Player {
   moving: boolean;
   alive: boolean;
   diedAt: number;
+  ghost: boolean; // knocked out and riding the rim
   bombs: number;
   range: number;
   speed: number;
   kick: boolean;
   remote: boolean;
   shield: boolean;
+  pierce: boolean;
+  napalm: boolean;
   invuln: number;
+  curse: number;
+  curseLeft: number;
+  immune: number;
   prev: number; // last tick's input, for press edges
   wins: number;
 }
@@ -78,6 +118,8 @@ export interface Bomb {
   fuse: number;
   range: number;
   remote: boolean;
+  pierce: boolean;
+  flame: number; // how long its fire burns
   dx: number; // sliding direction after a kick
   dy: number;
 }
@@ -85,14 +127,17 @@ export interface Bomb {
 export interface Game {
   tick: number;
   seed: number;
+  opts: Options;
+  map: number; // this round's map
   round: number;
   phase: Phase;
   phaseLeft: number;
   roundTick: number;
   endAt: number; // roundTick when the round is decided, -1 while it's open
-  roundWinner: number; // -1 = draw
+  roundWinner: number; // a player on the winning side, -1 = draw
   matchWinner: number;
   grid: number[];
+  floor: number[];
   items: number[];
   fire: number[];
   crumble: number[];
@@ -113,7 +158,9 @@ export const SPAWNS = [
 export const center = (c: number) => c * TILE + HALF;
 export const tileAt = (x: number, y: number) => Math.floor(y / TILE) * COLS + Math.floor(x / TILE);
 export const isPillar = (c: number, r: number) => c % 2 === 0 && r % 2 === 0;
+export const onRim = (c: number, r: number) => c === 0 || r === 0 || c === COLS - 1 || r === ROWS - 1;
 export const bombAt = (g: Game, i: number) => g.bombs.find((b) => tileAt(b.x, b.y) === i);
+export const sideOf = (g: Game, id: number) => (g.opts.teams ? g.opts.teams[id] : id);
 
 // Order the walls fall in after time-out: clockwise from the top-left, outer ring first.
 export const SPIRAL: number[] = (() => {
@@ -147,23 +194,31 @@ function freshPlayer(id: number): Player {
     moving: false,
     alive: true,
     diedAt: -1,
+    ghost: false,
     bombs: 1,
     range: 2,
     speed: 0,
     kick: false,
     remote: false,
     shield: false,
+    pierce: false,
+    napalm: false,
     invuln: 0,
+    curse: 0,
+    curseLeft: 0,
+    immune: 0,
     prev: 0,
     wins: 0,
   };
 }
 
-export function createGame(players: number, seed: number): Game {
+export function createGame(players: number, seed: number, opts: Partial<Options> = {}): Game {
   if (!(players >= 1 && players <= SPAWNS.length)) throw new RangeError("1 to 4 players");
   const g: Game = {
     tick: 0,
     seed: seed | 0,
+    opts: { map: 0, winRounds: WIN_ROUNDS, teams: null, ...opts },
+    map: 0,
     round: 1,
     phase: "ready",
     phaseLeft: 0,
@@ -172,6 +227,7 @@ export function createGame(players: number, seed: number): Game {
     roundWinner: -1,
     matchWinner: -1,
     grid: [],
+    floor: [],
     items: [],
     fire: [],
     crumble: [],
@@ -184,14 +240,23 @@ export function createGame(players: number, seed: number): Game {
   return g;
 }
 
+function floorFor(map: number, c: number, r: number) {
+  if (map === 1) return c >= 3 && c <= COLS - 4 && r >= 3 && r <= ROWS - 4 ? ICE : GRASS; // a rink in the middle
+  if (map === 2) return r === 5 ? BELT + 3 : r === ROWS - 6 ? BELT + 2 : GRASS; // two belts, running opposite ways
+  if (map === 3) return PARTNER.has(r * COLS + c) ? PORTAL : GRASS;
+  return GRASS;
+}
+
 function newRound(g: Game) {
-  const safe = new Set<number>();
+  g.map = g.opts.map >= 0 ? g.opts.map : Math.floor(rand(g) * MAPS.length);
+  const safe = new Set<number>(PARTNER.keys()); // portals start uncovered
   for (const [c, r] of SPAWNS) for (const [dc, dr] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) safe.add((r + dr) * COLS + c + dc);
   const n = COLS * ROWS;
+  g.floor = Array.from({ length: n }, (_, i) => floorFor(g.map, i % COLS, Math.floor(i / COLS)));
   g.grid = Array.from({ length: n }, (_, i) => {
     const c = i % COLS;
     const r = Math.floor(i / COLS);
-    if (c === 0 || r === 0 || c === COLS - 1 || r === ROWS - 1 || isPillar(c, r)) return WALL;
+    if (onRim(c, r) || isPillar(c, r)) return WALL;
     return !safe.has(i) && rand(g) < BLOCK_CHANCE ? BLOCK : FLOOR;
   });
   g.items = Array(n).fill(0);
@@ -240,8 +305,11 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     const p = g.players[id];
     const input = inputs[id] ?? 0;
     if (p.alive) control(g, id, p, input);
+    else if (p.ghost) haunt(g, id, p, input);
+    else if (g.tick - p.diedAt >= GHOST_DELAY) toRim(p);
     p.prev = input;
   }
+  passCurses(g);
 
   slideKicked(g);
   for (const b of g.bombs) if (!b.remote) b.fuse--;
@@ -265,12 +333,16 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     }
   });
 
-  const alive = g.players.filter((p) => p.alive);
-  if (g.endAt < 0 && alive.length <= 1) g.endAt = g.roundTick + END_GRACE;
+  // The round is decided once one side (a player, or a team) is left standing.
+  const sides = new Set(g.players.flatMap((p, id) => (p.alive ? [sideOf(g, id)] : [])));
+  if (g.endAt < 0 && sides.size <= 1) g.endAt = g.roundTick + END_GRACE;
   if (g.endAt >= 0 && g.roundTick >= g.endAt) {
-    g.roundWinner = alive.length === 1 ? g.players.indexOf(alive[0]) : -1;
-    const w = g.players[g.roundWinner];
-    if (w && ++w.wins >= WIN_ROUNDS) {
+    g.roundWinner = sides.size === 1 ? g.players.findIndex((p) => p.alive) : -1;
+    if (g.roundWinner >= 0) {
+      const side = sideOf(g, g.roundWinner);
+      g.players.forEach((p, id) => sideOf(g, id) === side && p.wins++);
+    }
+    if (g.roundWinner >= 0 && g.players[g.roundWinner].wins >= g.opts.winRounds) {
       g.matchWinner = g.roundWinner;
       [g.phase, g.phaseLeft] = ["over", OVER_TICKS];
     } else [g.phase, g.phaseLeft] = ["result", RESULT_TICKS];
@@ -279,85 +351,171 @@ export function tickGame(g: Game, inputs: readonly number[]) {
 
 function kill(g: Game, id: number) {
   const p = g.players[id];
-  [p.alive, p.diedAt] = [false, g.tick];
+  [p.alive, p.diedAt, p.curse, p.curseLeft] = [false, g.tick, 0, 0];
   for (const b of g.bombs) if (b.owner === id && b.remote) [b.remote, b.fuse] = [false, FUSE]; // nobody left to press the button
 }
 
-function control(g: Game, id: number, p: Player, input: number) {
-  const pressed = input & ~p.prev;
-  const here = tileAt(p.x, p.y);
-  if (pressed & BOMB && !bombAt(g, here) && g.bombs.filter((b) => b.owner === id).length < p.bombs) {
-    const c = here % COLS;
-    const r = Math.floor(here / COLS);
-    g.bombs.push({ id: g.nextBomb++, owner: id, x: center(c), y: center(r), fuse: FUSE, range: p.range, remote: p.remote, dx: 0, dy: 0 });
+// Revenge mode: after a knockout you reappear on the nearest stretch of the outer wall.
+function toRim(p: Player) {
+  const c = Math.floor(p.x / TILE);
+  const r = Math.floor(p.y / TILE);
+  const gaps = [r, ROWS - 1 - r, c, COLS - 1 - c];
+  const side = gaps.indexOf(Math.min(...gaps));
+  const [rc, rr] = [
+    [c, 0],
+    [c, ROWS - 1],
+    [0, r],
+    [COLS - 1, r],
+  ][side];
+  [p.x, p.y, p.ghost, p.moving] = [center(rc), center(rr), true, false];
+}
+
+function haunt(g: Game, id: number, p: Player, input: number) {
+  const c = Math.floor(p.x / TILE);
+  const r = Math.floor(p.y / TILE);
+  const corner = (c === 0 || c === COLS - 1) && (r === 0 || r === ROWS - 1);
+  if (input & ~p.prev & BOMB && !corner && !g.bombs.some((b) => b.owner === id)) {
+    const [dc, dr] = r === 0 ? [0, 1] : r === ROWS - 1 ? [0, -1] : c === 0 ? [1, 0] : [-1, 0]; // inward
+    for (let k = THROW; ; k++) {
+      const [tc, tr] = [c + dc * k, r + dr * k];
+      if (onRim(tc, tr)) break;
+      const i = tr * COLS + tc;
+      if (g.grid[i] === FLOOR && !bombAt(g, i)) {
+        g.bombs.push({ id: g.nextBomb++, owner: id, x: center(tc), y: center(tr), fuse: FUSE, range: 2, remote: false, pierce: false, flame: FLAME, dx: 0, dy: 0 });
+        break;
+      }
+    }
+  }
+  steer(g, p, input, SPEEDS[0], true);
+}
+
+const flip = (v: number) => (v & ~15) | ((v & UP) << 1) | ((v & DOWN) >> 1) | ((v & LEFT) << 1) | ((v & RIGHT) >> 1);
+
+function control(g: Game, id: number, p: Player, raw: number) {
+  if (p.curseLeft && --p.curseLeft === 0) p.curse = 0;
+  if (p.immune) p.immune--;
+  const input = p.curse === REVERSED ? flip(raw) : raw;
+  const pressed = raw & ~p.prev;
+  const before = tileAt(p.x, p.y);
+
+  if ((pressed & BOMB || p.curse === BUTTERFINGERS) && !bombAt(g, before) && g.bombs.filter((b) => b.owner === id).length < p.bombs) {
+    const c = before % COLS;
+    const r = Math.floor(before / COLS);
+    g.bombs.push({
+      id: g.nextBomb++,
+      owner: id,
+      x: center(c),
+      y: center(r),
+      fuse: FUSE,
+      range: p.curse === FIZZLE ? 1 : p.range,
+      remote: p.remote,
+      pierce: p.pierce,
+      flame: p.napalm ? NAPALM_FLAME : FLAME,
+      dx: 0,
+      dy: 0,
+    });
   }
   if (pressed & ACT) {
     const oldest = g.bombs.find((b) => b.owner === id && b.remote);
     if (oldest) [oldest.remote, oldest.fuse] = [false, 0];
   }
 
+  const speed = p.curse === SLUGGISH ? SLUGGISH_SPEED : SPEEDS[p.speed];
+  if (g.floor[before] === ICE && p.moving) p.moving = move(g, p, p.dir, speed); // sliding: no steering until you hit something
+  else steer(g, p, input, speed, false);
+
+  const belt = g.floor[tileAt(p.x, p.y)];
+  if (belt >= BELT && belt < BELT + 4) move(g, p, belt - BELT, BELT_SPEED);
+
+  const at = tileAt(p.x, p.y);
+  if (at !== before && g.floor[at] === PORTAL) {
+    const to = PARTNER.get(at)!;
+    if (g.grid[to] === FLOOR && !bombAt(g, to)) [p.x, p.y] = [center(to % COLS), center(Math.floor(to / COLS))];
+  }
+  const here = tileAt(p.x, p.y);
+  if (g.items[here] && g.grid[here] === FLOOR) {
+    pickUp(g, p, g.items[here]);
+    g.items[here] = 0;
+  }
+}
+
+// Pick a direction from the held keys (newest press first) and walk; on the rim when `rim`.
+function steer(g: Game, p: Player, input: number, speed: number, rim: boolean) {
+  const prev = p.curse === REVERSED ? flip(p.prev) : p.prev;
   const held = [0, 1, 2, 3].filter((d) => input & (1 << d));
-  const fresh = held.find((d) => !(p.prev & (1 << d)));
+  const fresh = held.find((d) => !(prev & (1 << d)));
   if (fresh !== undefined) p.want = fresh;
   const order = held.includes(p.want) ? [p.want, ...held.filter((d) => d !== p.want)] : held;
   p.moving = false;
   for (const d of order) {
-    if (move(g, p, d, SPEEDS[p.speed])) {
+    if (move(g, p, d, speed, rim)) {
       [p.dir, p.moving] = [d, true];
-      break;
+      return;
     }
   }
-  if (!p.moving && order.length) p.dir = order[0];
+  if (order.length) p.dir = order[0];
+}
 
-  const at = tileAt(p.x, p.y);
-  if (g.items[at] && g.grid[at] === FLOOR) {
-    pickUp(p, g.items[at]);
-    g.items[at] = 0;
+// Whoever carries a curse hands it to the first player they touch.
+function passCurses(g: Game) {
+  for (const a of g.players) {
+    if (!a.alive || !a.curse) continue;
+    const t = tileAt(a.x, a.y);
+    const b = g.players.find((q) => q !== a && q.alive && !q.curse && !q.immune && tileAt(q.x, q.y) === t);
+    if (!b) continue;
+    [b.curse, b.curseLeft] = [a.curse, a.curseLeft];
+    [a.curse, a.curseLeft, a.immune] = [0, 0, IMMUNE_TICKS];
   }
 }
 
-function pickUp(p: Player, item: number) {
+function pickUp(g: Game, p: Player, item: number) {
   if (item === ORB_UP) p.bombs = Math.min(p.bombs + 1, MAX_BOMBS);
   else if (item === FIRE_UP) p.range = Math.min(p.range + 1, MAX_RANGE);
   else if (item === SPEED_UP) p.speed = Math.min(p.speed + 1, SPEEDS.length - 1);
   else if (item === KICK) p.kick = true;
   else if (item === SHIELD) p.shield = true;
   else if (item === REMOTE) p.remote = true;
+  else if (item === PIERCE) p.pierce = true;
+  else if (item === NAPALM) p.napalm = true;
+  else if (item === SKULL) [p.curse, p.curseLeft] = [1 + Math.floor(rand(g) * (CURSES.length - 1)), CURSE_TICKS];
 }
 
 function open(g: Game, c: number, r: number) {
   return c >= 0 && r >= 0 && c < COLS && r < ROWS && g.grid[r * COLS + c] === FLOOR && !bombAt(g, r * COLS + c);
 }
+const rimOpen = (_g: Game, c: number, r: number) => c >= 0 && r >= 0 && c < COLS && r < ROWS && onRim(c, r);
 
 const bombCanEnter = (g: Game, c: number, r: number) =>
   open(g, c, r) && !g.players.some((p) => p.alive && tileAt(p.x, p.y) === r * COLS + c);
 
 // Grid movement with corner assist. Returns whether the player moved.
 // Your own orb never blocks you: only the tile *ahead* of the one you're centred on is checked.
-function move(g: Game, p: Player, d: number, dist: number): boolean {
+// Ghosts (`rim`) move the same way, but only along the outer wall.
+function move(g: Game, p: Player, d: number, dist: number, rim = false): boolean {
+  const can = rim ? rimOpen : open;
   const horiz = d >= 2;
   const c = Math.floor(p.x / TILE);
   const r = Math.floor(p.y / TILE);
   const off = horiz ? p.y - center(r) : p.x - center(c); // how far off the lane centre, across the move
   const along = horiz ? (p.x - center(c)) * DX[d] : (p.y - center(r)) * DY[d]; // > 0: already past the tile centre
-  const ahead = open(g, c + DX[d], r + DY[d]);
+  const ahead = can(g, c + DX[d], r + DY[d]);
 
   if (off !== 0) {
     const side = Math.sign(off);
     const [sc, sr] = horiz ? [c, r + side] : [c + side, r];
     let shift: number;
     if (ahead) shift = -side * Math.min(Math.abs(off), dist); // line up with this lane, then go
-    else if (Math.abs(off) >= LEAN && open(g, sc, sr) && open(g, sc + DX[d], sr + DY[d])) shift = side * dist; // slip into the next lane
+    else if (Math.abs(off) >= LEAN && can(g, sc, sr) && can(g, sc + DX[d], sr + DY[d])) shift = side * dist; // slip into the next lane
     else return false;
     if (horiz) p.y += shift;
     else p.x += shift;
-    if (Math.abs(shift) < dist) move(g, p, d, dist - Math.abs(shift));
+    if (Math.abs(shift) < dist) move(g, p, d, dist - Math.abs(shift), rim);
     return true;
   }
 
   let step = dist;
   if (!ahead) {
-    if (p.kick && along >= -dist) kickAt(g, (r + DY[d]) * COLS + c + DX[d], d);
+    if (!rim && p.kick && along >= -dist) kickAt(g, (r + DY[d]) * COLS + c + DX[d], d);
     if (along >= 0) return false;
     step = Math.min(dist, -along); // walk up to the tile centre and stop
   }
@@ -403,26 +561,28 @@ function explode(g: Game, lit: Bomb[]) {
     g.bombs.splice(k, 1);
     const c = Math.floor(b.x / TILE);
     const r = Math.floor(b.y / TILE);
-    g.fire[r * COLS + c] = FLAME;
+    const burn = (i: number) => (g.fire[i] = Math.max(g.fire[i], b.flame));
+    burn(r * COLS + c);
     for (let d = 0; d < 4; d++) {
       for (let s = 1; s <= b.range; s++) {
         const i = (r + DY[d] * s) * COLS + c + DX[d] * s;
         const t = g.grid[i];
-        if (t === WALL || t === CRUMBLE) break;
+        if (t === WALL) break;
+        if (t === CRUMBLE) {
+          if (b.pierce) continue;
+          break;
+        }
         if (t === BLOCK) {
           [g.grid[i], g.crumble[i], g.items[i]] = [CRUMBLE, FLAME, rollItem(g)];
+          if (b.pierce) continue; // Pierce: the blast carries on through
           break;
         }
-        g.fire[i] = FLAME;
-        if (g.items[i]) {
-          g.items[i] = 0;
-          break;
-        }
+        burn(i);
+        const hadItem = g.items[i] > 0;
+        g.items[i] = 0;
         const hit = bombAt(g, i);
-        if (hit) {
-          queue.push(hit);
-          break;
-        }
+        if (hit) queue.push(hit);
+        if ((hadItem || hit) && !b.pierce) break;
       }
     }
   }

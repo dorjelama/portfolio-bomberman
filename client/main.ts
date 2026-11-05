@@ -1,5 +1,5 @@
 import { Timeline } from "../shared/netcode.ts";
-import { ACT, BOMB, DOWN, LEFT, RIGHT, ROUND_TICKS, TICK_HZ, UP, createGame, type Game } from "../shared/sim.ts";
+import { ACT, BOMB, CURSES, DOWN, LEFT, MAPS, RIGHT, ROUND_TICKS, TICK_HZ, UP, createGame, type Game } from "../shared/sim.ts";
 import { render } from "./render.ts";
 import { ITEM_TILES, TRAINERS } from "./sprites.ts";
 
@@ -14,7 +14,11 @@ const ITEM_HELP = [
   "Kick: walk into an orb to send it sliding",
   "Shield: survive one blast",
   "Remote: your orbs wait for X / Shift",
+  "Pierce: blasts go straight through bushes",
+  "Napalm: your fire burns for 2 seconds",
+  "Skull: a random curse for 10 s. Touch someone to pass it on!",
 ];
+const TEAM_NAMES = ["Teal & Green", "Red & Purple"]; // team = seat % 2
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("game");
@@ -57,6 +61,7 @@ interface Lobby {
   code: string;
   seats: (LobbySeat | null)[];
   bots: boolean;
+  settings: { map: number; teams: boolean; winRounds: number };
   countdown: number;
   playing: boolean;
 }
@@ -134,7 +139,7 @@ let tapped = 0; // pressed since the last tick, so a tap shorter than one tick s
 const keyOf = (e: KeyboardEvent) => KEYS[e.key.length === 1 ? e.key.toLowerCase() : e.key] ?? 0;
 addEventListener("keydown", (e) => {
   const k = keyOf(e);
-  if (!k || e.ctrlKey || e.metaKey || e.altKey || (e.target instanceof Element && e.target.closest("input, button"))) return;
+  if (!k || e.ctrlKey || e.metaKey || e.altKey || (e.target instanceof Element && e.target.closest("input, button, select"))) return;
   e.preventDefault();
   held |= k;
   tapped |= k;
@@ -158,6 +163,12 @@ nameInput.onchange = () => {
   send({ type: "name", name: nameInput.value });
 };
 $<HTMLInputElement>("bots").onchange = (e) => send({ type: "bots", on: (e.target as HTMLInputElement).checked });
+const mapPick = $<HTMLSelectElement>("map");
+const modePick = $<HTMLSelectElement>("mode");
+const winsPick = $<HTMLSelectElement>("wins");
+mapPick.append(...["Random", ...MAPS].map((name, i) => new Option(name, String(i - 1))));
+mapPick.onchange = modePick.onchange = winsPick.onchange = () =>
+  send({ type: "settings", map: Number(mapPick.value), teams: modePick.value === "teams", winRounds: Number(winsPick.value) });
 $("ready").onclick = () => send({ type: "ready", ready: !lobby?.seats.find((s) => s?.you)?.ready });
 $("copy").onclick = async () => {
   try {
@@ -180,7 +191,8 @@ function showLobby() {
       face.src = FACES[seat];
       face.alt = "";
       const label = document.createElement("span");
-      label.textContent = s ? `${s.name}${s.you ? " (you)" : ""}: ${s.ready ? "ready" : "not ready"}` : l.bots ? "Bot" : "Empty";
+      const who = s ? `${s.name}${s.you ? " (you)" : ""}: ${s.ready ? "ready" : "not ready"}` : l.bots ? "Bot" : "Empty";
+      label.textContent = l.settings.teams ? `${who} · ${TEAM_NAMES[seat % 2]}` : who;
       li.append(face, label);
       if (!s) {
         const sit = document.createElement("button");
@@ -193,17 +205,22 @@ function showLobby() {
     })
   );
   $<HTMLInputElement>("bots").checked = l.bots;
+  mapPick.value = String(l.settings.map);
+  modePick.value = l.settings.teams ? "teams" : "ffa";
+  winsPick.value = String(l.settings.winRounds);
   const mine = l.seats.find((s) => s?.you);
-  const players = l.bots ? 4 : l.seats.filter(Boolean).length;
+  const taken = l.seats.flatMap((s, seat) => (s || l.bots ? [seat] : []));
   $("ready").hidden = !mine;
   $("ready").textContent = mine?.ready ? "Not ready" : "Ready!";
   $("lobbyNote").textContent = l.countdown
     ? `Starting in ${l.countdown}…`
     : !mine
       ? "All seats are taken. You're watching."
-      : players < 2
+      : taken.length < 2
         ? "Need 2 players: send the invite link, or turn on bots."
-        : "Starts when everyone is ready.";
+        : l.settings.teams && new Set(taken.map((s) => s % 2)).size < 2
+          ? "2v2 needs someone on each team: change seats or turn on bots."
+          : "Starts when everyone is ready.";
 }
 
 $("legend").append(
@@ -222,16 +239,31 @@ function hud() {
   const hurry = g.roundTick >= ROUND_TICKS;
   const left = Math.max(0, Math.ceil((ROUND_TICKS - g.roundTick) / TICK_HZ));
   const timer = hurry ? "HURRY!" : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
-  const won = (i: number, what: string) => (i === me ? `You win the ${what}!` : `${nameOf(i)} wins the ${what}`);
+  const team = (i: number) => g.opts.teams?.[i];
+  const won = (i: number, what: string) =>
+    g.opts.teams
+      ? team(i) === team(me) ? `Your team wins the ${what}!` : `${TEAM_NAMES[team(i)!]} win the ${what}`
+      : i === me ? `You win the ${what}!` : `${nameOf(i)} wins the ${what}`;
+  const you = g.players[me];
   let [title, sub] = ["", ""];
   if (roomFull) [title, sub] = ["This room is full", "Open the page without ?room= to start your own."];
   else if (!connected) [title, sub] = [lobby ? "Connection lost" : "Connecting…", lobby ? "Reconnecting…" : "The server may take a minute to wake up."];
   else if (inLobby || !tl) title = "";
-  else if (g.phase === "ready") [title, sub] = [`Round ${g.round}`, "Ready…"];
+  else if (g.phase === "ready") [title, sub] = [`Round ${g.round}: ${MAPS[g.map]}`, "Ready…"];
   else if (g.phase === "result") title = g.roundWinner < 0 ? "Draw!" : won(g.roundWinner, "round");
   else if (g.phase === "over") [title, sub] = [won(g.matchWinner, "match"), "Back to the lobby in a moment…"];
   const toast =
-    !tl || g.phase !== "play" ? "" : g.roundTick < 45 ? "GO!" : hurry && g.roundTick < ROUND_TICKS + 3 * TICK_HZ ? "Hurry! The walls are closing in" : "";
+    !tl || g.phase !== "play"
+      ? ""
+      : g.roundTick < 45
+        ? "GO!"
+        : you?.curse
+          ? `Cursed: ${CURSES[you.curse]} (${Math.ceil(you.curseLeft / TICK_HZ)}s). Touch someone to pass it on!`
+          : you?.ghost && g.endAt < 0
+            ? "Ghost: run along the wall, Space lobs an orb in"
+            : hurry && g.roundTick < ROUND_TICKS + 3 * TICK_HZ
+              ? "Hurry! The walls are closing in"
+              : "";
   const score = g.players.map((p, i) => `${seats()[i]}:${nameOf(i)}:${p.wins}:${p.alive || g.phase === "ready"}`).join(",");
 
   const key = [score, timer, title, sub, toast, inLobby, connected, me].join("|");
