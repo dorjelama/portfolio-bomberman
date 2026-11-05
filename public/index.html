@@ -33,6 +33,13 @@
       .mini[aria-pressed="false"] { opacity: 0.5; }
       #tally { margin: 0; color: var(--accent); }
       #tally:empty { display: none; }
+      .awards { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; text-align: left; font-size: 9px; }
+      .awards:empty { display: none; }
+      .awards li::before { content: "★ "; color: var(--accent); }
+      #tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+      #tags span { position: absolute; transform: translate(-50%, -100%); font-size: clamp(7px, 0.9vw, 10px); line-height: 1; white-space: nowrap; padding: 2px 3px; background: rgb(20 20 40 / 0.65); border-radius: 2px; }
+      #tags span[hidden] { display: none; }
+      #tags .ghost { opacity: 0.6; }
       .hud .out { opacity: 0.4; }
       #timer.hurry { color: var(--p2); }
       /* Fit the whole board on screen: the stage is as wide as the viewport height allows. */
@@ -86,9 +93,11 @@
 
       <div class="stage">
         <canvas id="game" width="240" height="208" aria-label="Arena"></canvas>
+        <div id="tags" aria-hidden="true"></div>
         <div id="status" hidden>
           <p id="statusText"></p>
           <p id="statusSub" class="help"></p>
+          <ul id="awards" class="awards"></ul>
         </div>
         <div id="toast" role="status" aria-live="polite"></div>
         <section id="lobby" aria-label="Lobby" hidden>
@@ -110,6 +119,7 @@
             <button id="ready" type="button" hidden>Ready!</button>
             <p id="lobbyNote" class="help" aria-live="polite"></p>
             <p id="tally"></p>
+            <ul id="lastAwards" class="awards" aria-label="Last match awards"></ul>
           </div>
         </section>
       </div>

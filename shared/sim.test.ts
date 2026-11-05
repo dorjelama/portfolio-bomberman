@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
   ACT, BLOCK, BOMB, BUTTERFINGERS, COLS, CRUMBLE, DOWN, END_GRACE, FLAME, FLOOR, FUSE, GHOST_DELAY, NAPALM_FLAME, OVER_TICKS,
-  REVERSED, RIGHT, ROUND_TICKS, SHRINK_EVERY, SPAWNS, SPIRAL, WALL, center, createGame, tickGame, tileAt, type Bomb, type Game,
+  REVERSED, RIGHT, ROUND_TICKS, SHRINK_EVERY, SPAWNS, SPIRAL, SWAP, WALL, center, createGame, tickGame, tileAt, type Bomb, type Game,
   type Options,
 } from "./sim.ts";
 
@@ -13,7 +13,8 @@ const run = (g: Game, ticks: number, inputs: number[] = []) => {
 };
 const place = (g: Game, id: number, c: number, r: number) => Object.assign(g.players[id], { x: center(c), y: center(r) });
 const orb = (owner: number, c: number, r: number, extra: Partial<Bomb> = {}): Bomb => ({
-  id: 900 + owner, owner, x: center(c), y: center(r), fuse: 999, range: 1, remote: false, pierce: false, flame: FLAME, dx: 0, dy: 0, ...extra,
+  id: 900 + owner, owner, x: center(c), y: center(r), fuse: 999, range: 1, remote: false, pierce: false, flame: FLAME,
+  revenge: false, dx: 0, dy: 0, hops: 0, ...extra,
 });
 const MIXED: Partial<Options> = { map: -1, teams: [0, 1, 0, 1] }; // random map each round, 2v2
 
@@ -253,4 +254,70 @@ test("teams: the round ends when one team is left, and both teammates score", ()
   run(g, END_GRACE + 1);
   assert.equal(g.phase, "result");
   assert.deepEqual(g.players.map((p) => p.wins), [1, 0, 1, 0]);
+});
+
+test("revenge comeback: a ghost whose orb knocks someone out takes their place", () => {
+  for (const revenge of [true, false]) {
+    const g = arena(3);
+    const ghost = Object.assign(g.players[0], { alive: false, ghost: true, diedAt: 0, x: center(0), y: center(5) });
+    place(g, 1, 3, 5);
+    place(g, 2, 9, 9);
+    if (revenge) tickGame(g, [BOMB]); // lobbed in from the left wall: lands 3 tiles in, on player 2
+    else g.bombs.push(orb(0, 3, 5, { fuse: 2 })); // an orb left over from before the knockout
+    run(g, FUSE);
+    assert.equal(g.players[1].alive, false);
+    assert.equal(ghost.stats.kos, 1);
+    assert.equal(ghost.alive, revenge, revenge ? "back in the game" : "leftover orbs don't count");
+    if (!revenge) continue;
+    assert.equal(tileAt(ghost.x, ghost.y), idx(3, 5), "in the knocked-out player's spot");
+    assert.equal(ghost.stats.comebacks, 1);
+    run(g, FLAME);
+    assert.ok(ghost.alive, "brief invulnerability: their own fire doesn't get them");
+  }
+});
+
+test("Glove throws an orb over walls; it bounces off taken tiles and wraps around the edge", () => {
+  const throwFrom = (c: number, blocks: number[]) => {
+    const g = arena();
+    place(g, 0, c, 1);
+    place(g, 1, 7, 9);
+    Object.assign(g.players[0], { glove: true, dir: 3 }); // facing right
+    for (const i of blocks) g.grid[i] = BLOCK;
+    tickGame(g, [BOMB]);
+    tickGame(g, [ACT]);
+    assert.ok(g.bombs[0].hops > 0, "in the air");
+    run(g, 40);
+    const b = g.bombs[0];
+    assert.equal(b.hops, 0, "landed");
+    return tileAt(b.x, b.y);
+  };
+  assert.equal(throwFrom(1, [idx(2, 1), idx(3, 1)]), idx(4, 1), "over two bushes");
+  assert.equal(throwFrom(1, [idx(4, 1)]), idx(5, 1), "bounced off a bush");
+  assert.equal(throwFrom(13, []), idx(3, 1), "over the wall, back in on the far side");
+});
+
+test("Swap trades places with an opponent; stats count orbs, bushes and own goals", () => {
+  const g = arena();
+  place(g, 0, 1, 1);
+  place(g, 1, 7, 7);
+  g.items[idx(2, 1)] = SWAP;
+  run(g, 15, [RIGHT]);
+  assert.equal(tileAt(g.players[0].x, g.players[0].y), idx(7, 7));
+  assert.equal(tileAt(g.players[1].x, g.players[1].y), idx(2, 1));
+  assert.equal(g.players[0].stats.pickups, 1);
+
+  const s = arena();
+  place(s, 0, 1, 1);
+  s.grid[idx(3, 1)] = BLOCK;
+  tickGame(s, [BOMB]);
+  run(s, FUSE);
+  assert.deepEqual([s.players[0].stats.orbs, s.players[0].stats.bushes, s.players[0].stats.oops], [1, 1, 1]);
+});
+
+test("online matches hold on the final board instead of starting a new one", () => {
+  const g = arena(2, { rematch: false, winRounds: 1 });
+  g.players[1].alive = false;
+  run(g, END_GRACE + 1 + OVER_TICKS * 2);
+  assert.equal(g.phase, "over");
+  assert.equal(g.matchWinner, 0);
 });

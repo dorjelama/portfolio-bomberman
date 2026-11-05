@@ -69,7 +69,11 @@ export const REMOTE = 6;
 export const PIERCE = 7;
 export const NAPALM = 8;
 export const SKULL = 9;
-const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 10]; // by item id
+export const GLOVE = 10;
+export const SWAP = 11;
+const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 10, 6, 4]; // by item id
+const THROW_HOPS = 3; // a gloved throw lands this many tiles away
+const FLY_SPEED = TILE / 8; // units per tick in the air: one tile every 8 ticks
 
 export const REVERSED = 1;
 export const SLUGGISH = 2;
@@ -83,7 +87,20 @@ export interface Options {
   map: number; // index into MAPS, or -1 for a random map each round
   winRounds: number;
   teams: number[] | null; // team per player, or null for free-for-all
+  rematch: boolean; // start a new match by itself after "over" (offline); online the server goes back to the lobby
 }
+
+// Counted over a whole match, for the end-of-match awards.
+export interface Stats {
+  kos: number; // opponents knocked out
+  oops: number; // knocked out by your own orb
+  bushes: number;
+  pickups: number;
+  curses: number; // curses passed on
+  comebacks: number;
+  orbs: number; // dropped or thrown
+}
+const freshStats = (): Stats => ({ kos: 0, oops: 0, bushes: 0, pickups: 0, curses: 0, comebacks: 0, orbs: 0 });
 
 export interface Player {
   x: number;
@@ -102,12 +119,14 @@ export interface Player {
   shield: boolean;
   pierce: boolean;
   napalm: boolean;
+  glove: boolean;
   invuln: number;
   curse: number;
   curseLeft: number;
   immune: number;
   prev: number; // last tick's input, for press edges
   wins: number;
+  stats: Stats;
 }
 
 export interface Bomb {
@@ -120,8 +139,10 @@ export interface Bomb {
   remote: boolean;
   pierce: boolean;
   flame: number; // how long its fire burns
-  dx: number; // sliding direction after a kick
+  revenge: boolean; // lobbed in by a ghost: knocking someone out with it brings the ghost back
+  dx: number; // sliding (kicked) or flying (thrown) direction
   dy: number;
+  hops: number; // tiles left in the air after a gloved throw; 0 = on the ground
 }
 
 export interface Game {
@@ -140,6 +161,8 @@ export interface Game {
   floor: number[];
   items: number[];
   fire: number[];
+  fireBy: number[]; // who lit each burning tile, for knockout credit
+  fireRevenge: number[]; // 1 where that fire came from a ghost's orb
   crumble: number[];
   bombs: Bomb[];
   nextBomb: number;
@@ -159,7 +182,7 @@ export const center = (c: number) => c * TILE + HALF;
 export const tileAt = (x: number, y: number) => Math.floor(y / TILE) * COLS + Math.floor(x / TILE);
 export const isPillar = (c: number, r: number) => c % 2 === 0 && r % 2 === 0;
 export const onRim = (c: number, r: number) => c === 0 || r === 0 || c === COLS - 1 || r === ROWS - 1;
-export const bombAt = (g: Game, i: number) => g.bombs.find((b) => tileAt(b.x, b.y) === i);
+export const bombAt = (g: Game, i: number) => g.bombs.find((b) => !b.hops && tileAt(b.x, b.y) === i); // orbs in the air don't count
 export const sideOf = (g: Game, id: number) => (g.opts.teams ? g.opts.teams[id] : id);
 
 // Order the walls fall in after time-out: clockwise from the top-left, outer ring first.
@@ -203,12 +226,14 @@ function freshPlayer(id: number): Player {
     shield: false,
     pierce: false,
     napalm: false,
+    glove: false,
     invuln: 0,
     curse: 0,
     curseLeft: 0,
     immune: 0,
     prev: 0,
     wins: 0,
+    stats: freshStats(),
   };
 }
 
@@ -217,7 +242,7 @@ export function createGame(players: number, seed: number, opts: Partial<Options>
   const g: Game = {
     tick: 0,
     seed: seed | 0,
-    opts: { map: 0, winRounds: WIN_ROUNDS, teams: null, ...opts },
+    opts: { map: 0, winRounds: WIN_ROUNDS, teams: null, rematch: true, ...opts },
     map: 0,
     round: 1,
     phase: "ready",
@@ -230,6 +255,8 @@ export function createGame(players: number, seed: number, opts: Partial<Options>
     floor: [],
     items: [],
     fire: [],
+    fireBy: [],
+    fireRevenge: [],
     crumble: [],
     bombs: [],
     nextBomb: 1,
@@ -261,6 +288,8 @@ function newRound(g: Game) {
   });
   g.items = Array(n).fill(0);
   g.fire = Array(n).fill(0);
+  g.fireBy = Array(n).fill(-1);
+  g.fireRevenge = Array(n).fill(0);
   g.crumble = Array(n).fill(0);
   g.bombs = [];
   g.shrink = 0;
@@ -269,7 +298,7 @@ function newRound(g: Game) {
   g.roundWinner = -1;
   g.phase = "ready";
   g.phaseLeft = READY_TICKS;
-  g.players.forEach((p, id) => Object.assign(p, freshPlayer(id), { wins: p.wins }));
+  g.players.forEach((p, id) => Object.assign(p, freshPlayer(id), { wins: p.wins, stats: p.stats }));
 }
 
 // One fixed step. inputs[i] is player i's input bits for this tick (missing = nothing held).
@@ -278,12 +307,19 @@ export function tickGame(g: Game, inputs: readonly number[]) {
   if (g.phase !== "play") {
     g.players.forEach((p, id) => (p.prev = inputs[id] ?? 0)); // a key held through "Ready" doesn't drop an orb at "Go"
     if (--g.phaseLeft > 0) return;
+    if (g.phase === "over" && !g.opts.rematch) {
+      g.phaseLeft = 1; // hold on the final board
+      return;
+    }
     if (g.phase === "ready") {
       g.phase = "play";
       return;
     }
     if (g.phase === "over") {
-      g.players.forEach((p) => (p.wins = 0));
+      for (const p of g.players) {
+        p.wins = 0;
+        p.stats = freshStats();
+      }
       g.round = 0;
       g.matchWinner = -1;
     }
@@ -312,14 +348,16 @@ export function tickGame(g: Game, inputs: readonly number[]) {
   passCurses(g);
 
   slideKicked(g);
+  flyThrown(g);
   for (const b of g.bombs) if (!b.remote) b.fuse--;
-  explode(g, g.bombs.filter((b) => b.fuse <= 0 || g.fire[tileAt(b.x, b.y)] > 0));
+  g.bombs = g.bombs.filter((b) => !(b.hops && b.fuse < -2 * TICK_HZ)); // can't land anywhere (the arena filled in): fizzle out
+  explode(g, g.bombs.filter((b) => !b.hops && (b.fuse <= 0 || g.fire[tileAt(b.x, b.y)] > 0)));
 
   if (g.roundTick > ROUND_TICKS && (g.roundTick - ROUND_TICKS) % SHRINK_EVERY === 0 && g.shrink < SPIRAL.length) {
     const i = SPIRAL[g.shrink++];
     g.grid[i] = WALL;
     g.items[i] = g.fire[i] = g.crumble[i] = 0;
-    g.bombs = g.bombs.filter((b) => tileAt(b.x, b.y) !== i);
+    g.bombs = g.bombs.filter((b) => b.hops || tileAt(b.x, b.y) !== i);
   }
 
   g.players.forEach((p, id) => {
@@ -329,7 +367,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     if (g.grid[i] === WALL) kill(g, id);
     else if (g.fire[i] && !p.invuln) {
       if (p.shield) [p.shield, p.invuln] = [false, INVULN];
-      else kill(g, id);
+      else knockedOut(g, id, i);
     }
   });
 
@@ -347,6 +385,20 @@ export function tickGame(g: Game, inputs: readonly number[]) {
       [g.phase, g.phaseLeft] = ["over", OVER_TICKS];
     } else [g.phase, g.phaseLeft] = ["result", RESULT_TICKS];
   }
+}
+
+// Caught in fire on tile i: credit whoever lit it, and a ghost whose orb did it comes back in their place.
+function knockedOut(g: Game, id: number, i: number) {
+  kill(g, id);
+  const by = g.fireBy[i];
+  if (by === id) g.players[id].stats.oops++;
+  if (by < 0 || by === id || sideOf(g, by) === sideOf(g, id)) return;
+  const killer = g.players[by];
+  killer.stats.kos++;
+  if (!g.fireRevenge[i] || !killer.ghost) return;
+  const { wins, stats, prev } = killer;
+  Object.assign(killer, freshPlayer(by), { x: center(i % COLS), y: center(Math.floor(i / COLS)), invuln: INVULN, wins, stats, prev });
+  stats.comebacks++;
 }
 
 function kill(g: Game, id: number) {
@@ -381,7 +433,11 @@ function haunt(g: Game, id: number, p: Player, input: number) {
       if (onRim(tc, tr)) break;
       const i = tr * COLS + tc;
       if (g.grid[i] === FLOOR && !bombAt(g, i)) {
-        g.bombs.push({ id: g.nextBomb++, owner: id, x: center(tc), y: center(tr), fuse: FUSE, range: 2, remote: false, pierce: false, flame: FLAME, dx: 0, dy: 0 });
+        g.bombs.push({
+          id: g.nextBomb++, owner: id, x: center(tc), y: center(tr), fuse: FUSE, range: 2,
+          remote: false, pierce: false, flame: FLAME, revenge: true, dx: 0, dy: 0, hops: 0,
+        });
+        p.stats.orbs++;
         break;
       }
     }
@@ -411,13 +467,24 @@ function control(g: Game, id: number, p: Player, raw: number) {
       remote: p.remote,
       pierce: p.pierce,
       flame: p.napalm ? NAPALM_FLAME : FLAME,
+      revenge: false,
       dx: 0,
       dy: 0,
+      hops: 0,
     });
+    p.stats.orbs++;
   }
   if (pressed & ACT) {
-    const oldest = g.bombs.find((b) => b.owner === id && b.remote);
-    if (oldest) [oldest.remote, oldest.fuse] = [false, 0];
+    // Glove: grab the orb you're on or facing and throw it. Otherwise the button detonates (Remote).
+    const ahead = before + [-COLS, COLS, -1, 1][p.dir];
+    const grab = p.glove ? [before, ahead].map((i) => bombAt(g, i)).find((b) => b && !b.dx && !b.dy) : undefined;
+    if (grab) {
+      const t = tileAt(grab.x, grab.y);
+      [grab.x, grab.y, grab.dx, grab.dy, grab.hops] = [center(t % COLS), center(Math.floor(t / COLS)), DX[p.dir], DY[p.dir], THROW_HOPS];
+    } else {
+      const oldest = g.bombs.find((b) => b.owner === id && b.remote);
+      if (oldest) [oldest.remote, oldest.fuse] = [false, 0];
+    }
   }
 
   const speed = p.curse === SLUGGISH ? SLUGGISH_SPEED : SPEEDS[p.speed];
@@ -434,8 +501,10 @@ function control(g: Game, id: number, p: Player, raw: number) {
   }
   const here = tileAt(p.x, p.y);
   if (g.items[here] && g.grid[here] === FLOOR) {
-    pickUp(g, p, g.items[here]);
+    const item = g.items[here];
     g.items[here] = 0;
+    p.stats.pickups++;
+    pickUp(g, id, p, item);
   }
 }
 
@@ -465,10 +534,11 @@ function passCurses(g: Game) {
     if (!b) continue;
     [b.curse, b.curseLeft] = [a.curse, a.curseLeft];
     [a.curse, a.curseLeft, a.immune] = [0, 0, IMMUNE_TICKS];
+    a.stats.curses++;
   }
 }
 
-function pickUp(g: Game, p: Player, item: number) {
+function pickUp(g: Game, id: number, p: Player, item: number) {
   if (item === ORB_UP) p.bombs = Math.min(p.bombs + 1, MAX_BOMBS);
   else if (item === FIRE_UP) p.range = Math.min(p.range + 1, MAX_RANGE);
   else if (item === SPEED_UP) p.speed = Math.min(p.speed + 1, SPEEDS.length - 1);
@@ -478,6 +548,13 @@ function pickUp(g: Game, p: Player, item: number) {
   else if (item === PIERCE) p.pierce = true;
   else if (item === NAPALM) p.napalm = true;
   else if (item === SKULL) [p.curse, p.curseLeft] = [1 + Math.floor(rand(g) * (CURSES.length - 1)), CURSE_TICKS];
+  else if (item === GLOVE) p.glove = true;
+  else if (item === SWAP) {
+    // Trade places with a random opponent, right now.
+    const foes = g.players.filter((q, j) => q.alive && sideOf(g, j) !== sideOf(g, id));
+    const q = foes[Math.floor(rand(g) * foes.length)];
+    if (q) [p.x, p.y, q.x, q.y] = [q.x, q.y, p.x, p.y];
+  }
 }
 
 function open(g: Game, c: number, r: number) {
@@ -530,9 +607,32 @@ function kickAt(g: Game, i: number, d: number) {
   [b.dx, b.dy] = [DX[d], DY[d]];
 }
 
+// Thrown orbs fly a tile every 8 ticks over everything. Off the edge they come down on the far side;
+// if the landing tile is taken they bounce on a tile at a time.
+function flyThrown(g: Game) {
+  for (const b of g.bombs) {
+    if (!b.hops) continue;
+    b.x += b.dx * FLY_SPEED;
+    b.y += b.dy * FLY_SPEED;
+    if ((b.x - HALF) % TILE || (b.y - HALF) % TILE) continue; // between tiles
+    let c = Math.floor(b.x / TILE);
+    let r = Math.floor(b.y / TILE);
+    if (c === 0) c = COLS - 2;
+    else if (c === COLS - 1) c = 1;
+    if (r === 0) r = ROWS - 2;
+    else if (r === ROWS - 1) r = 1;
+    [b.x, b.y] = [center(c), center(r)];
+    if (--b.hops > 0) continue;
+    const i = r * COLS + c;
+    const taken = g.bombs.some((o) => o !== b && !o.hops && tileAt(o.x, o.y) === i);
+    if (g.grid[i] === FLOOR && !taken) [b.dx, b.dy] = [0, 0];
+    else b.hops = 1;
+  }
+}
+
 function slideKicked(g: Game) {
   for (const b of g.bombs) {
-    if (!b.dx && !b.dy) continue;
+    if (b.hops || (!b.dx && !b.dy)) continue;
     const c = Math.floor(b.x / TILE);
     const r = Math.floor(b.y / TILE);
     const along = (b.x - center(c)) * b.dx + (b.y - center(r)) * b.dy;
@@ -561,7 +661,10 @@ function explode(g: Game, lit: Bomb[]) {
     g.bombs.splice(k, 1);
     const c = Math.floor(b.x / TILE);
     const r = Math.floor(b.y / TILE);
-    const burn = (i: number) => (g.fire[i] = Math.max(g.fire[i], b.flame));
+    const burn = (i: number) => {
+      g.fire[i] = Math.max(g.fire[i], b.flame);
+      [g.fireBy[i], g.fireRevenge[i]] = [b.owner, b.revenge ? 1 : 0];
+    };
     burn(r * COLS + c);
     for (let d = 0; d < 4; d++) {
       for (let s = 1; s <= b.range; s++) {
@@ -574,6 +677,7 @@ function explode(g: Game, lit: Bomb[]) {
         }
         if (t === BLOCK) {
           [g.grid[i], g.crumble[i], g.items[i]] = [CRUMBLE, FLAME, rollItem(g)];
+          g.players[b.owner].stats.bushes++;
           if (b.pierce) continue; // Pierce: the blast carries on through
           break;
         }

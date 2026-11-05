@@ -6,8 +6,15 @@ A 4-player online bomb-maze brawl set in the Critter Catch world, made for playi
 
 - **Maps:** Meadow; Ice Rink (you slide until you hit something); Factory (conveyor belts); Portal Garden (two linked pairs). Pick one in the lobby, or Random for a new map each round.
 - **Modes:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
-- **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one at a time). Nobody sits out.
-- **Power-ups:** Orb+, Fire+, Speed+, Kick, Shield, Remote, Pierce (blasts through bushes), Napalm (2 s fire), and Skull (a random 10 s curse: reversed, sluggish, butterfingers or fizzle, passed on by touch).
+- **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one at a time). If your orb knocks out an opponent, you're back in their place. Nobody sits out.
+- **Power-ups:**
+  - Orb+, Fire+, Speed+, Kick, Shield, Remote
+  - Pierce: blasts go through bushes
+  - Napalm: your fire burns for 2 s
+  - Skull: a random 10 s curse (reversed, sluggish, butterfingers or fizzle), passed on by touch
+  - Glove: throw an orb over walls, and it wraps around the edge
+  - Swap: trade places with a random opponent
+- **Awards** after each match: most knockouts, comeback kid, hot potato, bush whacker, collector, trigger happy, and "Oops!" for knocking yourself out. Name tags above every trainer show who's who.
 - **Feel:**
   - Sound effects and an original chiptune loop, synthesised in the browser (no audio files), with Sound and Music toggles.
   - Gamepads work.

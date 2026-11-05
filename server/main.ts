@@ -114,6 +114,7 @@ function startMatch(room: Room) {
     map,
     winRounds,
     teams: teams ? room.roster.map((r) => r.seat % 2) : null,
+    rematch: false,
   });
   room.countdown = 0;
   for (const c of room.clients) sendStart(room, c);

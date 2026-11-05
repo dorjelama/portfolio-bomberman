@@ -125,7 +125,16 @@ export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], 
         ctx.globalAlpha = 1;
       }
     }
-    for (const b of g.bombs) if (Math.floor(b.y / TILE) === r) drawOrb(ctx, b, t);
+    for (const b of g.bombs) if (!b.hops && Math.floor(b.y / TILE) === r) drawOrb(ctx, b, t);
     for (const id of byY) if (Math.floor(g.players[id].y / TILE) === r) drawTrainer(ctx, g, id, seats[id] ?? id, nudge[id]);
+  }
+  // Thrown orbs fly over everything: a hop arc per tile, with a shadow on the ground.
+  for (const b of g.bombs) {
+    if (!b.hops) continue;
+    const along = ((((b.x - TILE / 2) * b.dx + (b.y - TILE / 2) * b.dy) % TILE) + TILE) % TILE;
+    const lift = Math.round(Math.sin((along / TILE) * Math.PI) * 6);
+    ctx.fillStyle = "rgb(0 0 0 / 0.3)";
+    ctx.fillRect(Math.round(b.x / PX) - 4, Math.round(b.y / PX) + 4, 8, 2);
+    drawOrb(ctx, { ...b, y: b.y - lift * PX }, t);
   }
 }

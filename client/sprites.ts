@@ -156,7 +156,7 @@ const STONE = [
   "kkkkkkkkkkkkkkkk",
 ];
 
-// Power-up icons, indexed by item id in shared/sim.ts (1 = Orb+ … 9 = Skull).
+// Power-up icons, indexed by item id in shared/sim.ts (1 = Orb+ … 11 = Swap).
 const ICONS = [
   [],
   ["....kYk...", "....kbk...", "..kkkkkk..", ".kNwnnnnk.", "kNwnnnnnnk", "kcccccccck", "knnnnnnnnk", ".knnnnnnk.", "..kkkkkk..", ".........."],
@@ -168,6 +168,8 @@ const ICONS = [
   ["....k.....", "....kk....", "....kck...", "kkkkkcck..", "kccccccck.", "kccccccck.", "kkkkkcck..", "....kck...", "....kk....", "....k....."],
   ["....kk....", "...kcck...", "...kcck...", "..kccock..", ".kccoocck.", ".kcooYock.", ".kcoYYock.", ".kccoocck.", "..kcccck..", "...kkkk..."],
   ["..kkkkkk..", ".kwwwwwwk.", "kwwwwwwwwk", "kwkkwwkkwk", "kwkkwwkkwk", "kwwwwkwwwk", ".kwwwwwwk.", "..kwkwkwk.", "..kkkkkkk.", ".........."],
+  ["..k.k.k...", ".kwkwkwk..", ".kwkwkwk..", ".kwwwwwwk.", "kkwwwwwwk.", "kwkwwwwwk.", ".kwwwwwwk.", "..kwwwwk..", "..kRRRRk..", "..kkkkkk.."],
+  ["......k...", "kkkkkkYk..", "kYYYYYYYk.", "kkkkkkYk..", "......k...", "...k......", "..ktkkkkkk", ".ktttttttk", "..ktkkkkkk", "...k......"],
 ];
 
 // Ground for the special maps: ice, a conveyor segment (drawn pointing right; rotated per direction), a portal.

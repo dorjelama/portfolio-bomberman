@@ -1,5 +1,7 @@
 import { Timeline } from "../shared/netcode.ts";
-import { ACT, BOMB, CURSES, DOWN, LEFT, MAPS, RIGHT, ROUND_TICKS, TICK_HZ, UP, createGame, sideOf, tileAt, type Game } from "../shared/sim.ts";
+import {
+  ACT, BOMB, COLS, CURSES, DOWN, LEFT, MAPS, RIGHT, ROUND_TICKS, ROWS, TICK_HZ, TILE, UP, createGame, sideOf, tileAt, type Game, type Stats,
+} from "../shared/sim.ts";
 import { music, settings as audio, setPref, sfx, unlock } from "./audio.ts";
 import { render } from "./render.ts";
 import { ITEM_TILES, TRAINERS } from "./sprites.ts";
@@ -18,8 +20,20 @@ const ITEM_HELP = [
   "Pierce: blasts go straight through bushes",
   "Napalm: your fire burns for 2 seconds",
   "Skull: a random curse for 10 s. Touch someone to pass it on!",
+  "Glove: X / Shift on (or facing) an orb throws it over walls",
+  "Swap: instantly trade places with a random opponent",
 ];
 const TEAM_NAMES = ["Teal & Green", "Red & Purple"]; // team = seat % 2
+// End-of-match awards: [stat, title, how to say the number]. Only shown when someone scored at least 1.
+const AWARDS: [keyof Stats, string, (n: number) => string][] = [
+  ["kos", "Most knockouts", (n) => `${n} KO${n === 1 ? "" : "s"}`],
+  ["comebacks", "Comeback kid", (n) => `back from the wall ×${n}`],
+  ["curses", "Hot potato", (n) => `passed on ${n} curse${n === 1 ? "" : "s"}`],
+  ["bushes", "Bush whacker", (n) => `${n} bush${n === 1 ? "" : "es"}`],
+  ["pickups", "Collector", (n) => `${n} power-up${n === 1 ? "" : "s"}`],
+  ["orbs", "Trigger happy", (n) => `${n} orb${n === 1 ? "" : "s"}`],
+  ["oops", "Oops!", (n) => `own orb ×${n}`],
+];
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = $<HTMLCanvasElement>("game");
@@ -119,6 +133,8 @@ function onMessage(m: any) {
   } else if (m.type === "start") {
     tl = new Timeline(m.g, m.you);
     heard.clear(); // orb ids start again from 1 in a new match
+    tossed.clear();
+    lastAwards = [];
     [roster, me, shown, stale] = [m.roster, m.you, tl.g, false];
     lastSent = m.g.players[m.you]?.prev ?? 0;
     delay = Math.min(4, Math.max(1, Math.round(rtt / TICK_MS / 4))); // more ping, a little more delay, fewer rewinds
@@ -175,23 +191,40 @@ function padInput() {
 
 // ---------- sounds: worked out from what's drawn, so a rewind never plays one twice ----------
 const heard = new Set<number>(); // orbs we've already played a drop for
+const tossed = new Set<number>(); // ...and a gloved throw for
 let lastOrbs = new Map<number, number>(); // orb id → tile, as drawn last frame
 let lastAlive: boolean[] = [];
 let lastPhase = "";
 let lastHurry = false;
 let lastKit: number[] = [];
 let lastCurse = 0;
+let lastTile = -1;
+let backUntil = 0; // show "You're back in!" until then
 function listen(g: Game) {
   for (const b of g.bombs) {
-    if (heard.has(b.id)) continue;
-    heard.add(b.id);
-    (g.players[b.owner]?.alive ? sfx.drop : sfx.lob)();
+    if (!heard.has(b.id)) {
+      heard.add(b.id);
+      (g.players[b.owner]?.alive ? sfx.drop : sfx.lob)();
+    }
+    if (b.hops && !tossed.has(b.id)) {
+      tossed.add(b.id);
+      sfx.lob();
+    }
   }
   const orbs = new Map(g.bombs.map((b) => [b.id, tileAt(b.x, b.y)]));
   if ([...lastOrbs].some(([id, tile]) => !orbs.has(id) && g.fire[tile] > 0)) sfx.boom(); // gone in flames, not just un-predicted
   lastOrbs = orbs;
   if (g.players.some((p, i) => lastAlive[i] && !p.alive)) sfx.ko();
+  if (g.phase === "play" && lastPhase === "play" && g.players.some((p, i) => lastAlive[i] === false && p.alive)) {
+    sfx.comeback(); // a ghost's orb got someone: they're back
+    if (lastAlive[me] === false && g.players[me]?.alive) backUntil = performance.now() + 2000;
+  }
   lastAlive = g.players.map((p) => p.alive);
+  const mine = g.players[me];
+  const tile = mine?.alive ? tileAt(mine.x, mine.y) : -1;
+  const far = (a: number, b: number) => Math.abs((a % COLS) - (b % COLS)) + Math.abs(Math.floor(a / COLS) - Math.floor(b / COLS)) > 1;
+  if (tile >= 0 && lastTile >= 0 && far(tile, lastTile)) sfx.whoosh(); // swapped or through a portal
+  lastTile = tile;
 
   if (g.phase !== lastPhase && lastPhase) {
     if (g.phase === "ready") sfx.ready();
@@ -285,6 +318,7 @@ function showLobby() {
   );
   $<HTMLInputElement>("bots").checked = l.bots;
   $("tally").textContent = l.tally.length ? `Tonight: ${l.tally.map((e) => `${e.you ? "You" : e.name} ${e.wins}`).join(" · ")}` : "";
+  showAwards($("lastAwards"), lastAwards);
   mapPick.value = String(l.settings.map);
   modePick.value = l.settings.teams ? "teams" : "ffa";
   winsPick.value = String(l.settings.winRounds);
@@ -311,6 +345,48 @@ $("legend").append(
   })
 );
 
+// ---------- awards ----------
+let lastAwards: string[] = []; // from the match that just ended, shown again in the lobby
+
+function awards(g: Game) {
+  return AWARDS.flatMap(([key, title, say]) => {
+    const best = Math.max(...g.players.map((p) => p.stats[key]));
+    if (best < 1) return [];
+    const who = g.players.flatMap((p, i) => (p.stats[key] === best ? [nameOf(i)] : []));
+    return [`${title}: ${who.join(" & ")} (${say(best)})`];
+  });
+}
+
+function showAwards(list: HTMLElement, items: string[]) {
+  list.replaceChildren(
+    ...items.map((text) => {
+      const li = document.createElement("li");
+      li.textContent = text;
+      return li;
+    })
+  );
+}
+
+// ---------- name tags: page text over the canvas, so they stay crisp at any size ----------
+const PX = TILE / 16;
+function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
+  const box = $("tags");
+  const players = g?.players ?? [];
+  while (box.children.length < players.length) box.append(document.createElement("span"));
+  [...box.children].forEach((el, i) => {
+    const tag = el as HTMLElement;
+    const p = players[i];
+    tag.hidden = !p || !(p.alive || p.ghost);
+    if (tag.hidden) return;
+    const d = drift[i] ?? { x: 0, y: 0 };
+    const [text, cls] = [nameOf(i), `p${seats()[i] + 1}${p.alive ? "" : " ghost"}`];
+    if (tag.textContent !== text) tag.textContent = text;
+    if (tag.className !== cls) tag.className = cls;
+    tag.style.left = `${((p.x + d.x) / PX / (COLS * 16)) * 100}%`;
+    tag.style.top = `${(((p.y + d.y) / PX - 16) / (ROWS * 16)) * 100}%`;
+  });
+}
+
 // ---------- HUD ----------
 let lastHud = "";
 function hud() {
@@ -332,12 +408,15 @@ function hud() {
   else if (g.phase === "ready") [title, sub] = [`Round ${g.round}: ${MAPS[g.map]}`, "Ready…"];
   else if (g.phase === "result") title = g.roundWinner < 0 ? "Draw!" : won(g.roundWinner, "round");
   else if (g.phase === "over") [title, sub] = [won(g.matchWinner, "match"), "Back to the lobby in a moment…"];
+  if (tl && g.phase === "over") lastAwards = awards(g);
   const toast =
     !tl || g.phase !== "play"
       ? ""
       : g.roundTick < 45
         ? "GO!"
-        : you?.curse
+        : performance.now() < backUntil
+          ? "You're back in!"
+          : you?.curse
           ? `Cursed: ${CURSES[you.curse]} (${Math.ceil(you.curseLeft / TICK_HZ)}s). Touch someone to pass it on!`
           : you?.ghost && g.endAt < 0
             ? "Ghost: run along the wall, Space lobs an orb in"
@@ -346,9 +425,11 @@ function hud() {
               : "";
   const score = g.players.map((p, i) => `${seats()[i]}:${nameOf(i)}:${p.wins}:${p.alive || g.phase === "ready"}`).join(",");
 
-  const key = [score, timer, title, sub, toast, inLobby, connected, me].join("|");
+  const shownAwards = tl && g.phase === "over" ? lastAwards : [];
+  const key = [score, timer, title, sub, toast, inLobby, connected, me, shownAwards].join("|");
   if (key === lastHud) return;
   lastHud = key;
+  showAwards($("awards"), shownAwards);
   $("score").replaceChildren(
     ...(inLobby || !tl
       ? []
@@ -402,8 +483,9 @@ function frame(now: number) {
       d.y *= 0.8;
     }
   }
-  music(!!tl && audio.music);
+  music(audio.music); // lobby too, once the browser has allowed audio
   render(ctx, shown, seats(), tl?.drift);
+  nameTags(tl && !(lobby && !lobby.playing) ? shown : null, tl?.drift);
   hud();
   requestAnimationFrame(frame);
 }
