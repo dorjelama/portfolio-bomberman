@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
-  ACT, BELT, BLOCK, BOMB, BUMPERCROP, BUTTERFINGERS, CHEAT_SHIFT, COLDSNAP, COLS, CROP, CRUMBLE, DARK_TICKS, DOWN, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
+  ACT, ALL_ITEMS, BELT, BLOCK, BOMB, DEFAULT_WEIGHTS, BUMPERCROP, BUTTERFINGERS, CHEAT_SHIFT, COLDSNAP, COLS, CROP, CRUMBLE, DARK_TICKS, DOWN, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
   HARVEST, HOLY_TICKS, HOLYCOW, ICE, LANES, LEFT, LIGHTSOUT, MAX_BOMBS, MAX_RANGE, NAPALM_FLAME, POPCORN, RAINDANCE, OVER_TICKS, POTATO, READY_TICKS, RESPAWN_TICKS, RESULT_TICKS, REVERSED, RIGHT, ROBBED, ROUND_TICKS, SKULL,
   SHRINK_EVERY, SNAP_TICKS, SPAWNS, SPEEDS, SPIRAL, SWAP, TOPSYTURVY, cheatBlock, TICK_HZ, TRACTOR, WALL, center, createGame, roundTicks, tickGame, tileAt, tractor, type Bomb,
   type Game,
@@ -15,7 +15,7 @@ const run = (g: Game, ticks: number, inputs: number[] = []) => {
 };
 const place = (g: Game, id: number, c: number, r: number) => Object.assign(g.players[id], { x: center(c), y: center(r) });
 const orb = (owner: number, c: number, r: number, extra: Partial<Bomb> = {}): Bomb => ({
-  id: 900 + owner, owner, x: center(c), y: center(r), fuse: 999, range: 1, remote: false, pierce: false, frost: false, flame: FLAME,
+  id: 900 + owner, owner, x: center(c), y: center(r), fuse: 999, range: 1, remote: false, frost: false, flame: FLAME,
   revenge: false, dx: 0, dy: 0, hops: 0, ...extra,
 });
 const MIXED: Partial<Options> = { map: -1, teams: [0, 1, 0, 1] }; // random map each round, 2v2
@@ -205,16 +205,37 @@ test("revenge: a knocked-out player rides the rim and lobs orbs inward, with a w
   assert.equal(p.stats.orbs, 2, "ready again");
 });
 
-test("Pierce blasts carry on through crates; Napalm fire burns longer", () => {
-  for (const pierce of [false, true]) {
+test("a room's drop rates decide how many crates drop a power-up, and which", () => {
+  // An orb on every open tile breaks every crate next to one, in one tick; return what each broken crate left.
+  const smash = (opts: Partial<Options>) => {
+    const g = createGame(2, 5, opts);
+    g.phase = "play";
+    const crates = g.grid.flatMap((t, i) => (t === BLOCK ? [i] : []));
+    g.grid.forEach((t, i) => t === FLOOR && g.bombs.push(orb(0, i % COLS, Math.floor(i / COLS), { id: 1000 + i, fuse: 1 })));
+    tickGame(g, []);
+    const broken = crates.filter((i) => g.grid[i] === CRUMBLE);
+    assert.ok(broken.length > 20);
+    return broken.map((i) => g.items[i]);
+  };
+  const only = (keep: number, w = 1) => DEFAULT_WEIGHTS.map((_, id) => (id === keep ? w : 0));
+  const skulls = smash({ drop: 100, weights: only(SKULL) });
+  assert.ok(skulls.every((item) => item === SKULL), "every crate drops, and only what has a weight");
+  assert.ok(smash({ drop: 0 }).every((item) => !item), "no crate drops anything");
+  // Switched off, or retired (7 was Pierce): never, however big the number.
+  const rest = smash({ drop: 100, items: ALL_ITEMS & ~(1 << SKULL), weights: DEFAULT_WEIGHTS.map((_, id) => (id === SKULL || id === 7 ? 100 : 1)) });
+  assert.ok(rest.every((item) => item > 0 && item !== SKULL && item !== 7));
+});
+
+test("A blast stops at the first crate it breaks; Napalm fire burns longer", () => {
+  {
     const g = arena();
     place(g, 0, 7, 7);
     g.grid[idx(3, 1)] = g.grid[idx(4, 1)] = BLOCK;
-    g.bombs.push(orb(0, 1, 1, { fuse: 1, range: 4, pierce }));
+    g.bombs.push(orb(0, 1, 1, { fuse: 1, range: 4 }));
     tickGame(g, []);
     assert.equal(g.grid[idx(3, 1)], CRUMBLE);
-    assert.equal(g.grid[idx(4, 1)], pierce ? CRUMBLE : BLOCK);
-    assert.equal(g.fire[idx(5, 1)] > 0, pierce);
+    assert.equal(g.grid[idx(4, 1)], BLOCK);
+    assert.equal(g.fire[idx(5, 1)], 0);
   }
   const g = arena();
   place(g, 0, 7, 7);

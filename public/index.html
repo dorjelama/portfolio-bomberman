@@ -149,8 +149,13 @@
       #rules[open] { padding: 8px; border: 2px solid var(--dim); border-radius: 4px; }
       #rules summary { cursor: pointer; color: var(--accent); }
       #rules > * + * { margin-top: 8px; }
-      #itemPicks { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px 10px; }
-      #itemPicks label { gap: 6px; font-size: 9px; }
+      #itemPicks { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 14px; }
+      #itemPicks .pick { display: flex; gap: 6px; align-items: center; }
+      #itemPicks label { flex: 1; min-width: 0; gap: 6px; font-size: 9px; }
+      #itemPicks .share { min-width: 5ch; text-align: right; font-size: 9px; color: var(--dim); }
+      .rate { font: inherit; width: 6.5em; padding: 4px; background: var(--bg); color: var(--ink); border: 2px solid var(--dim); }
+      .rate:disabled { opacity: 0.4; }
+      #resetRates { justify-self: start; padding: 6px 8px; }
       #itemPicks img { width: 20px; height: 20px; image-rendering: pixelated; }
       select { font: inherit; padding: 6px; background: var(--bg); color: var(--ink); border: 2px solid var(--dim); }
       input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
@@ -167,7 +172,8 @@
       html:not(.touch) .touch-only, html.touch .keys-only { display: none; }
       header button { padding: 6px 8px; }
       /* iOS zooms the page into any text field under 16px, and stays zoomed. */
-      html.touch :is(#name, #cheatInput, select) { font-size: 16px; }
+      html.touch :is(#name, #cheatInput, select, .rate) { font-size: 16px; }
+      html.touch .rate { width: 5em; } /* no spin buttons on phones */
       html.touch :is(#name, #cheatInput) { width: 0; } /* they stretch to fill anyway; at 16px their default 20 letters would widen the page */
 
       /* Small screens, in the lobby: the lobby leaves the arena box (too small to hold it) and becomes part of the page. */
@@ -313,8 +319,10 @@
                 <label title="Off: a round still going at 0:00 is a draw"><input type="checkbox" id="shrink" /> Sudden death: walls close in at 0:00</label>
                 <label title="Type cheat codes during a match. Each works once a round, for whoever types it first."><input type="checkbox" id="cheats" /> Cheats</label>
               </div>
-              <p class="help">Power-ups that can drop:</p>
+              <label title="In Harvest, half of broken crates drop a carrot instead">Crates that drop a power-up <input type="number" id="drop" class="rate" min="0" max="100" step="5" inputmode="numeric" />%</label>
+              <p class="help">Power-ups that can drop, and how often: each number counts against the others that are ticked, and the % is its share of drops.</p>
               <div id="itemPicks"></div>
+              <button id="resetRates" type="button">Reset power-ups</button>
             </details>
             <button id="ready" type="button" hidden>Ready!</button>
             <p id="lobbyNote" class="help" aria-live="polite"></p>

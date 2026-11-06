@@ -5,7 +5,6 @@ import { DOWN, LEFT, RIGHT, UP } from "../shared/sim.ts";
 export const touch = {
   bits: 0, // held now
   tapped: 0, // pressed since the last tick, so a tap shorter than one tick still counts
-  onPress: () => {}, // a button went down (for a little haptic tap)
 };
 
 // Eight ways, so rolling your thumb from right towards down pre-turns into the next gap, as holding two keys does.
@@ -102,7 +101,6 @@ export function button(el: HTMLElement, bit: number) {
     touch.bits |= bit;
     touch.tapped |= bit;
     el.classList.add("down");
-    touch.onPress();
   });
   const up = (e: PointerEvent) => e.pointerId === id && reset();
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"] as const) el.addEventListener(type, up);

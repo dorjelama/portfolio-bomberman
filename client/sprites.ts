@@ -52,7 +52,7 @@ const ICONS = [
   ["..kkkk....", "..kbbk....", "..kbbk....", "..kbbk....", "..kbbbk...", "..kbbbbkk.", ".kobbbbbbk", ".kbbbbbbbk", ".kkkkkkkkk", ".........."],
   ["kkkkkkkkkk", "kwRRRrRRRk", "kRRRRrRRRk", "kRrrrrrrrk", "kRRRRrRRRk", ".kRRRrRRk.", ".kRRRrRRk.", "..kRRRRk..", "...kRRk...", "....kk...."],
   ["......kYk.", ".......k..", "..kkkkkkk.", "..kRRRRRk.", "..kRcccRk.", "..kRcwcRk.", "..kRcccRk.", "..kRRRRRk.", "..krRrRrk.", "..kkkkkkk."],
-  ["....k.....", "....kk....", "....kck...", "kkkkkcck..", "kccccccck.", "kccccccck.", "kkkkkcck..", "....kck...", "....kk....", "....k....."],
+  [], // 7 was Pierce (removed)
   ["....kk....", "...kcck...", "...kcck...", "..kccock..", ".kccoocck.", ".kcooYock.", ".kcoYYock.", ".kccoocck.", "..kcccck..", "...kkkk..."],
   ["..kkkkkk..", ".kwwwwwwk.", "kwwwwwwwwk", "kwkkwwkkwk", "kwkkwwkkwk", "kwwwwkwwwk", ".kwwwwwwk.", "..kwkwkwk.", "..kkkkkkk.", ".........."],
   ["..k.k.k...", ".kwkwkwk..", ".kwkwkwk..", ".kwwwwwwk.", "kkwwwwwwk.", "kwkwwwwwk.", ".kwwwwwwk.", "..kwwwwk..", "..kRRRRk..", "..kkkkkk.."],

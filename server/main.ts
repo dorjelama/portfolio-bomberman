@@ -7,7 +7,7 @@ import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { botInput } from "../shared/bot.ts";
 import { InputQueue } from "../shared/netcode.ts";
-import { ALL_ITEMS, MAPS, MODES, ROUND_CHOICES, TICK_HZ, createGame, freshStats, sideOf, tickGame, type Game, type Stats } from "../shared/sim.ts";
+import { ALL_ITEMS, DEFAULT_DROP, DEFAULT_WEIGHTS, MAPS, MODES, RETIRED_ITEMS, ROUND_CHOICES, TICK_HZ, createGame, freshStats, sideOf, tickGame, type Game, type Stats } from "../shared/sim.ts";
 
 const PORT = Number(process.env.PORT) || 8000;
 const SEATS = 4;
@@ -56,10 +56,22 @@ interface Settings {
   shrink: boolean;
   revenge: boolean;
   items: number; // power-ups that can drop, as a bitmask by item id
+  weights: number[]; // how often each power-up drops, by item id
+  drop: number; // percent of broken crates that leave a power-up
   mode: number; // index into MODES: Classic, Harvest, Hot Potato
   cheats: boolean;
 }
-const DEFAULT_SETTINGS: Settings = { map: -1, teams: false, winRounds: 2, roundSecs: 90, shrink: true, revenge: true, items: ALL_ITEMS, mode: 0, cheats: false };
+const DEFAULT_SETTINGS: Settings = {
+  map: -1, teams: false, winRounds: 2, roundSecs: 90, shrink: true, revenge: true, items: ALL_ITEMS, weights: DEFAULT_WEIGHTS, drop: DEFAULT_DROP,
+  mode: 0, cheats: false,
+};
+const percent = (v: unknown) => typeof v === "number" && v >= 0 && v <= 100; // also rules out NaN
+// Drop rates from a client: one 0..100 per item id, to one decimal. Missing (saved before rooms had them) means the defaults.
+function weightsFrom(v: unknown): number[] | null {
+  if (v === undefined) return DEFAULT_WEIGHTS;
+  if (!Array.isArray(v) || v.length !== DEFAULT_WEIGHTS.length || !v.every(percent)) return null;
+  return v.map((w: number, id) => (id && !RETIRED_ITEMS.includes(id) ? Math.round(w * 10) / 10 : 0));
+}
 interface Room {
   code: string;
   clients: Client[];
@@ -245,7 +257,9 @@ function handle(room: Room, c: Client, m: Record<string, unknown>) {
     room.bots = m.on === true;
     sendLobby(room);
   } else if (m.type === "settings") {
-    const { map, teams, winRounds, roundSecs, shrink, revenge, items, mode = 0, cheats } = m; // settings saved before modes existed have no mode
+    const { map, teams, winRounds, roundSecs, shrink, revenge, items, mode = 0, cheats, drop = DEFAULT_DROP } = m; // settings saved before modes existed have no mode
+    const weights = weightsFrom(m.weights);
+    if (!weights || !percent(drop)) return;
     if (!Number.isInteger(map) || (map as number) < -1 || (map as number) >= MAPS.length) return;
     if (!Number.isInteger(winRounds) || (winRounds as number) < 1 || (winRounds as number) > 5) return;
     if (!ROUND_CHOICES.includes(roundSecs as number)) return;
@@ -259,6 +273,8 @@ function handle(room: Room, c: Client, m: Record<string, unknown>) {
       shrink: shrink === true,
       revenge: revenge === true,
       items: items as number,
+      weights,
+      drop: Math.round(drop as number),
       mode: mode as number,
       cheats: cheats === true,
     };

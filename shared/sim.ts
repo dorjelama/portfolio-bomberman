@@ -30,7 +30,7 @@ const IMMUNE_TICKS = TICK_HZ; // after passing a curse on, so it can't bounce st
 export const MAX_BOMBS = 8;
 export const MAX_RANGE = 8;
 const BLOCK_CHANCE = 0.75;
-const DROP_CHANCE = 0.35;
+export const DEFAULT_DROP = 35; // percent of broken crates that leave a power-up; a room rule (Options.drop)
 
 // Input bits. Directions are indexed 0..3 (up, down, left, right), so direction d is bit 1 << d.
 export const UP = 1;
@@ -95,7 +95,7 @@ export const SPEED_UP = 3;
 export const KICK = 4;
 export const SHIELD = 5;
 export const REMOTE = 6;
-export const PIERCE = 7;
+// 7 was Pierce, removed 2026-11-06. The id stays empty so the others, and room settings people have saved, keep their meaning.
 export const NAPALM = 8;
 export const SKULL = 9;
 export const GLOVE = 10;
@@ -103,8 +103,11 @@ export const SWAP = 11;
 export const FROST = 12;
 export const GUST = 13;
 export const CROP = 14; // Harvest mode only: not a power-up, so it has no weight and no checkbox
-// By item id. The luck-driven ones (Skull, Swap, Gust) are kept rare, so the better player usually wins.
-const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 4, 6, 2, 6, 3];
+// The default drop rates, by item id: each one's share of drops, in percent (they add up to 100). Rooms can change them
+// (Options.weights). Swap and Gust are pure luck, so they're kept rare and the better player usually wins.
+//                             -  Orb+  Fire+ Speed+ Kick Shield Remote -  Napalm Skull Glove Swap Frost Gust
+export const DEFAULT_WEIGHTS = [0, 22.5, 22.5, 11, 7, 5.5, 5, 0, 4, 11, 4.5, 1.5, 3.5, 2];
+export const RETIRED_ITEMS = [7]; // Pierce: never drops, whatever a room asks for
 export const FROST_TICKS = 5 * TICK_HZ; // how long Frost ice lasts
 const CROP_CHANCE = 0.5; // Harvest: a broken crate drops a crop this often, else the usual power-up roll
 export const RESPAWN_TICKS = 2 * TICK_HZ; // Harvest: from a knockout back to your corner
@@ -114,7 +117,7 @@ export const CLASSIC = 0;
 export const HARVEST = 1;
 export const POTATO = 2;
 export const MODES = ["Classic", "Harvest", "Hot Potato"];
-export const ALL_ITEMS = ITEM_WEIGHTS.reduce((mask, _, id) => (id ? mask | (1 << id) : mask), 0);
+export const ALL_ITEMS = DEFAULT_WEIGHTS.reduce((mask, _, id) => (id ? mask | (1 << id) : mask), 0);
 export const ROUND_CHOICES = [60, 90, 120, 180, 300]; // seconds
 export const THROW_HOPS = 3; // a throw (glove, or a ghost from the rim) lands this many tiles away, further if that tile is taken
 export const HELD = -1; // a bomb's hops while someone carries it overhead
@@ -138,6 +141,8 @@ export interface Options {
   shrink: boolean; // sudden death: walls close in at time-out; otherwise time-out is a draw
   revenge: boolean; // knocked-out players come back as ghosts on the rim
   items: number; // which power-ups can drop: bit (1 << item id)
+  weights: number[]; // by item id: how often each one drops, against the others that are on (DEFAULT_WEIGHTS)
+  drop: number; // percent of broken crates that leave a power-up (DEFAULT_DROP)
   mode: number; // index into MODES
   cheats: boolean; // players can use cheats (see CHEAT_SHIFT)
 }
@@ -190,7 +195,6 @@ export interface Player {
   kick: boolean;
   remote: boolean;
   shield: boolean;
-  pierce: boolean;
   napalm: boolean;
   glove: boolean;
   frost: boolean;
@@ -217,7 +221,6 @@ export interface Bomb {
   fuse: number;
   range: number;
   remote: boolean;
-  pierce: boolean;
   frost: boolean; // its blast leaves ice
   flame: number; // how long its fire burns
   revenge: boolean; // lobbed in by a ghost: knocking someone out with it brings the ghost back
@@ -323,7 +326,6 @@ function freshPlayer(id: number): Player {
     kick: false,
     remote: false,
     shield: false,
-    pierce: false,
     napalm: false,
     glove: false,
     frost: false,
@@ -351,6 +353,7 @@ export function createGame(players: number, seed: number, opts: Partial<Options>
     opts: {
       map: 0, winRounds: WIN_ROUNDS, teams: null, rematch: true,
       roundSecs: ROUND_TICKS / TICK_HZ, shrink: true, revenge: true, items: ALL_ITEMS, mode: CLASSIC, cheats: false,
+      weights: DEFAULT_WEIGHTS.slice(), drop: DEFAULT_DROP,
       ...opts,
     },
     map: 0,
@@ -628,7 +631,7 @@ function haunt(g: Game, id: number, p: Player, input: number) {
     const d = r === 0 ? 1 : r === ROWS - 1 ? 0 : c === 0 ? 3 : 2; // inward
     g.bombs.push({
       id: g.nextBomb++, owner: id, x: center(c), y: center(r), fuse: FUSE, range: 2,
-      remote: false, pierce: false, frost: false, flame: FLAME, revenge: true, dx: DX[d], dy: DY[d], hops: THROW_HOPS,
+      remote: false, frost: false, flame: FLAME, revenge: true, dx: DX[d], dy: DY[d], hops: THROW_HOPS,
     });
     [p.dir, p.threwAt] = [d, g.tick]; // turn to face the arena as you throw
     p.stats.orbs++;
@@ -667,7 +670,6 @@ function control(g: Game, id: number, p: Player, raw: number) {
       fuse: FUSE,
       range: p.curse === FIZZLE ? 1 : p.range,
       remote: p.remote && !fumble,
-      pierce: p.pierce,
       frost: p.frost,
       flame: p.napalm ? NAPALM_FLAME : FLAME,
       revenge: false,
@@ -762,8 +764,8 @@ function passCurses(g: Game) {
 function catchCurse(p: Player, curse: number, left: number) {
   [p.curse, p.curseLeft] = [curse, left];
   if (curse !== ROBBED) return;
-  const { bombs, range, speed, kick, remote, shield, pierce, napalm, glove, frost } = freshPlayer(0);
-  Object.assign(p, { bombs, range, speed, kick, remote, shield, pierce, napalm, glove, frost });
+  const { bombs, range, speed, kick, remote, shield, napalm, glove, frost } = freshPlayer(0);
+  Object.assign(p, { bombs, range, speed, kick, remote, shield, napalm, glove, frost });
 }
 
 // Why player id can't use a cheat right now, or "" if they can. The client asks the same question before sending one.
@@ -804,7 +806,6 @@ function pickUp(g: Game, id: number, p: Player, item: number) {
   else if (item === KICK) p.kick = true;
   else if (item === SHIELD) p.shield = true;
   else if (item === REMOTE) p.remote = true;
-  else if (item === PIERCE) p.pierce = true;
   else if (item === NAPALM) p.napalm = true;
   else if (item === SKULL) catchCurse(p, 1 + Math.floor(rand(g) * (CURSES.length - 1)), CURSE_TICKS);
   else if (item === GLOVE) p.glove = true;
@@ -909,11 +910,16 @@ function slideKicked(g: Game) {
 
 // What a broken crate leaves: usually nothing, unless `sure`.
 function rollItem(g: Game, sure = false) {
-  if (!sure && rand(g) >= DROP_CHANCE) return 0;
-  const weights = ITEM_WEIGHTS.map((w, id) => (g.opts.items & (1 << id) ? w : 0)); // switched-off power-ups never drop
+  if (!sure && rand(g) * 100 >= (g.opts.drop ?? DEFAULT_DROP)) return 0;
+  // The room's rates; switched-off and retired power-ups never drop.
+  const rates = g.opts.weights ?? DEFAULT_WEIGHTS;
+  const on = (id: number) => g.opts.items & (1 << id) && !RETIRED_ITEMS.includes(id);
+  const weights = DEFAULT_WEIGHTS.map((_, id) => (on(id) ? Math.max(0, rates[id] || 0) : 0));
   const total = weights.reduce((a, b) => a + b);
   let roll = rand(g) * total;
-  return total ? weights.findIndex((w) => (roll -= w) < 0) : 0;
+  const id = weights.findIndex((w) => (roll -= w) < 0);
+  // Missed only if every power-up is off, or rounding on fractional weights leaves a sliver over: then the last one.
+  return id >= 0 ? id : Math.max(0, weights.findLastIndex((w) => w > 0));
 }
 
 // Blasts run all chain reactions in the same tick, so every client sees them land together.
@@ -936,16 +942,11 @@ function explode(g: Game, lit: Bomb[]) {
       for (let s = 1; s <= b.range; s++) {
         const i = (r + DY[d] * s) * COLS + c + DX[d] * s;
         const t = g.grid[i];
-        if (t === WALL) break;
-        if (t === CRUMBLE) {
-          if (b.pierce) continue;
-          break;
-        }
+        if (t === WALL || t === CRUMBLE) break;
         if (t === BLOCK) {
           const crop = g.opts.mode === HARVEST && rand(g) < CROP_CHANCE;
           [g.grid[i], g.crumble[i], g.items[i]] = [CRUMBLE, FLAME, crop ? CROP : rollItem(g)];
           g.players[b.owner].stats.bushes++;
-          if (b.pierce) continue; // Pierce: the blast carries on through
           break;
         }
         burn(i);
@@ -953,7 +954,7 @@ function explode(g: Game, lit: Bomb[]) {
         g.items[i] = 0;
         const hit = bombAt(g, i);
         if (hit) queue.push(hit);
-        if ((hadItem || hit) && !b.pierce) break;
+        if (hadItem || hit) break;
       }
     }
   }

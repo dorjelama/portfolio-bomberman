@@ -10,16 +10,12 @@ const ESCAPE_TILES = 5; // how far a bot will run from its own orb before the fu
 const GHOST_THROW_CHANCE = 0.05; // per tick once lined up, so people get a moment to react
 
 // Tiles an explosion from `from` would reach. Mirrors explode() in sim.ts.
-function blast(g: Game, from: number, range: number, bombs: Set<number>, out: Uint8Array, pierce = false) {
+function blast(g: Game, from: number, range: number, bombs: Set<number>, out: Uint8Array) {
   out[from] = 1;
   for (const s of STEPS) {
-    for (let k = 1, i = from + s; k <= range && g.grid[i] !== WALL; k++, i += s) {
-      if (g.grid[i] !== FLOOR) {
-        if (pierce) continue;
-        break;
-      }
+    for (let k = 1, i = from + s; k <= range && g.grid[i] === FLOOR; k++, i += s) {
       out[i] = 1;
-      if ((g.items[i] || bombs.has(i)) && !pierce) break;
+      if (g.items[i] || bombs.has(i)) break;
     }
   }
 }
@@ -27,7 +23,7 @@ function blast(g: Game, from: number, range: number, bombs: Set<number>, out: Ui
 function dangerMap(g: Game, id: number, bombs: Set<number>) {
   const d = new Uint8Array(g.grid.length);
   g.fire.forEach((f, i) => f && (d[i] = 1));
-  for (const b of g.bombs) blast(g, tileAt(b.x, b.y), b.range, bombs, d, b.pierce);
+  for (const b of g.bombs) blast(g, tileAt(b.x, b.y), b.range, bombs, d);
   if (g.opts.shrink && g.roundTick >= roundTicks(g) - TICK_HZ) for (const i of SPIRAL.slice(g.shrink, g.shrink + 15)) d[i] = 1;
   LANES.forEach(([row], k) => {
     const t = tractor(g, k);
@@ -119,7 +115,7 @@ export function botInput(g: Game, id: number): number {
 
   if (!(p.prev & BOMB) && mine.length < p.bombs && !bombs.has(here) && worth(g, id, here, p.range)) {
     const after = danger.slice();
-    blast(g, here, p.range, bombs, after, p.pierce);
+    blast(g, here, p.range, bombs, after);
     if (firstStep(here, blocked, (i) => !after[i], ESCAPE_TILES) >= 0) return BOMB;
   }
 

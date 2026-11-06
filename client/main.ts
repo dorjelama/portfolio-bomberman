@@ -1,6 +1,6 @@
 import { Timeline } from "../shared/netcode.ts";
 import {
-  ACT, BOMB, BUTTERFINGERS, CHEAT_CODES, CHEAT_SHIFT, COLS, CROP, CURSES, DARK_TICKS, DOWN, GHOST_RELOAD, GLOVE, HARVEST, HOLY_TICKS, LANES, LEFT,
+  ACT, BOMB, BUTTERFINGERS, CHEAT_CODES, CHEAT_SHIFT, COLS, CROP, CURSES, DARK_TICKS, DEFAULT_DROP, DEFAULT_WEIGHTS, DOWN, GHOST_RELOAD, GLOVE, HARVEST, HOLY_TICKS, LANES, LEFT,
   MAPS, MODES, NIGHT, REMOTE, RIGHT, ROBBED, ROUND_CHOICES, ROWS, SNAP_TICKS, TICK_HZ, TILE, TOPSY_TICKS, UP, cheatBlock, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor,
   type Claim, type Game, type Knockout, type Stats,
 } from "../shared/sim.ts";
@@ -21,7 +21,7 @@ const ITEM_HELP = [
   "Kick: walk into an orb to send it sliding",
   "Shield: survive one blast",
   "Remote: your orbs wait for {act}",
-  "Pierce: blasts go straight through crates",
+  "", // 7 was Pierce (removed): no checkbox, no legend
   "Napalm: your fire burns for 2 seconds",
   "Skull: a random 10 s curse you pass on by touch, or Robbed: you lose every power-up",
   "Glove: hold {act} by an orb to carry it, let go to throw it over walls",
@@ -144,6 +144,7 @@ interface Lobby {
   bots: boolean;
   settings: {
     map: number; teams: boolean; winRounds: number; roundSecs: number; revenge: boolean; shrink: boolean; items: number; mode: number; cheats: boolean;
+    weights: number[]; drop: number; // power-up drop rates, by item id, and % of crates that drop one
   };
   tally: { name: string; wins: number; you: boolean }[];
   totals: { name: string; stats: Stats; you: boolean }[]; // award stats summed over every match in this room
@@ -251,11 +252,10 @@ addEventListener("keydown", unlock); // browsers only start audio from a user ge
 addEventListener("touchend", unlock); // iOS only counts the end of a tap
 addEventListener("click", unlock);
 
-// Touch: the stick and buttons (touch.ts) only make input bits. A button buzzes when pressed, like a real one.
+// Touch: the stick and buttons (touch.ts) only make input bits.
 stick($("stick"));
 button($("orbBtn"), BOMB);
 button($("actBtn"), ACT);
-touch.onPress = () => vibrate(12);
 const liveTouch = () => touchMode && document.documentElement.classList.contains("live");
 addEventListener("contextmenu", (e) => liveTouch() && e.preventDefault()); // a long press would open the menu
 document.addEventListener("gesturestart", (e) => liveTouch() && e.preventDefault()); // iOS pinch-zoom
@@ -419,7 +419,7 @@ function listen(g: Game) {
   if ([...lastOrbs].some(([id, tile]) => !orbs.has(id) && g.fire[tile] > 0)) sfx.boom(); // gone in flames, not just un-predicted
   lastOrbs = orbs;
   if (g.players.some((p, i) => lastAlive[i] && !p.alive)) sfx.ko();
-  if (lastAlive[me] && !g.players[me]?.alive) vibrate([90, 50, 160]); // you're out
+  if (lastAlive[me] && !g.players[me]?.alive) vibrate([90, 50, 160]); // you're out: the only thing that buzzes
   if (g.phase === "play" && lastPhase === "play" && g.players.some((p, i) => lastAlive[i] === false && p.alive)) {
     (g.opts.mode === HARVEST ? sfx.respawn : sfx.comeback)(); // Harvest respawns are often: save the fanfare for a ghost's comeback
     if (lastAlive[me] === false && g.players[me]?.alive) backUntil = performance.now() + 2000;
@@ -450,7 +450,7 @@ function listen(g: Game) {
   lastHurry = hurry;
 
   const p = g.players[me];
-  const kit = p ? [p.bombs, p.range, p.speed, +p.kick, +p.remote, +p.shield, +p.pierce, +p.napalm, +p.glove, +p.frost, p.crops] : [];
+  const kit = p ? [p.bombs, p.range, p.speed, +p.kick, +p.remote, +p.shield, +p.napalm, +p.glove, +p.frost, p.crops] : [];
   if (p?.alive && kit.some((v, i) => v > lastKit[i])) sfx.pickup();
   lastKit = kit;
   if (p?.curse && !lastCurse) sfx.curse();
@@ -502,17 +502,34 @@ const cheatsPick = $<HTMLInputElement>("cheats");
 mapPick.append(...["Random", ...MAPS].map((name, i) => new Option(name, String(i - 1))));
 gamePick.append(...MODES.map((name, i) => new Option(name, String(i))));
 timePick.append(...ROUND_CHOICES.map((s) => new Option(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`, String(s))));
-// One checkbox per power-up, with its icon.
+// One row per power-up: a checkbox to switch it on, a number for how often it comes up against the others that are on,
+// and the share of drops that works out to.
+const dropPick = $<HTMLInputElement>("drop");
 const itemPicks = ITEM_HELP.flatMap((help, id) => {
-  if (!id) return [];
+  if (!help) return []; // no item 0, and retired ones
+  const name = help.split(":")[0];
   const box = Object.assign(document.createElement("input"), { type: "checkbox" });
   const icon = Object.assign(new Image(), { src: ITEM_TILES[id]!.toDataURL(), alt: "" });
   const label = document.createElement("label");
   label.title = help;
-  label.append(box, icon, help.split(":")[0]);
-  $("itemPicks").append(label);
-  return [{ id, box }];
+  label.append(box, icon, name);
+  const rate = Object.assign(document.createElement("input"), { type: "number", className: "rate", min: "0", max: "100", step: "0.5", inputMode: "decimal" });
+  rate.setAttribute("aria-label", `How often ${name} drops`);
+  const share = Object.assign(document.createElement("span"), { className: "share" });
+  const row = Object.assign(document.createElement("div"), { className: "pick" });
+  row.append(label, rate, share);
+  $("itemPicks").append(row);
+  return [{ id, box, rate, share }];
 });
+const percent = (v: string) => Math.min(100, Math.max(0, Number(v) || 0));
+// Worked out from the boxes as they are, so it follows your typing before anything is sent.
+function showShares() {
+  const total = itemPicks.reduce((t, p) => t + (p.box.checked ? percent(p.rate.value) : 0), 0);
+  for (const p of itemPicks) {
+    p.rate.disabled = !p.box.checked;
+    p.share.textContent = p.box.checked ? `${+((total ? percent(p.rate.value) / total : 0) * 100).toFixed(1)}%` : "off";
+  }
+}
 const sendSettings = () =>
   send({
     type: "settings",
@@ -523,12 +540,27 @@ const sendSettings = () =>
     revenge: revengePick.checked,
     shrink: shrinkPick.checked,
     items: itemPicks.reduce((mask, { id, box }) => (box.checked ? mask | (1 << id) : mask), 0),
+    weights: DEFAULT_WEIGHTS.map((_, id) => percent(itemPicks.find((p) => p.id === id)?.rate.value ?? "0")),
+    drop: percent(dropPick.value),
     mode: Number(gamePick.value),
     cheats: cheatsPick.checked,
   });
-for (const el of [gamePick, mapPick, modePick, winsPick, timePick, revengePick, shrinkPick, cheatsPick, ...itemPicks.map((p) => p.box)]) {
-  el.onchange = sendSettings;
+for (const el of [gamePick, mapPick, modePick, winsPick, timePick, revengePick, shrinkPick, cheatsPick, dropPick, ...itemPicks.map((p) => p.rate)]) {
+  el.onchange = sendSettings; // a number goes when you leave its box or press Enter, not on every key
 }
+for (const { box, rate } of itemPicks) {
+  box.onchange = () => {
+    showShares();
+    sendSettings();
+  };
+  rate.oninput = showShares;
+}
+$("resetRates").onclick = () => {
+  for (const p of itemPicks) [p.box.checked, p.rate.value] = [true, String(DEFAULT_WEIGHTS[p.id])];
+  dropPick.value = String(DEFAULT_DROP);
+  showShares();
+  sendSettings();
+};
 
 const toggleReady = () => send({ type: "ready", ready: !lobby?.seats.find((s) => s?.you)?.ready });
 $("ready").onclick = toggleReady;
@@ -610,7 +642,14 @@ function showLobby() {
   gamePick.value = String(l.settings.mode);
   $("gameHelp").textContent = `${MODE_HINTS[l.settings.mode] ?? ""}${l.settings.cheats ? " Cheats are on." : ""}`;
   revengePick.disabled = shrinkPick.disabled = l.settings.mode === HARVEST; // Harvest respawns you and runs to 0:00
-  for (const { id, box } of itemPicks) box.checked = !!(l.settings.items & (1 << id));
+  // A box you're typing in keeps your number until you leave it, when it's sent.
+  const typingIn = (el: HTMLElement) => document.activeElement === el;
+  for (const { id, box, rate } of itemPicks) {
+    box.checked = !!(l.settings.items & (1 << id));
+    if (!typingIn(rate)) rate.value = String(l.settings.weights[id] ?? 0);
+  }
+  if (!typingIn(dropPick)) dropPick.value = String(l.settings.drop);
+  showShares();
   const mine = l.seats.find((s) => s?.you);
   const taken = l.seats.flatMap((s, seat) => (s || l.bots ? [seat] : []));
   $("ready").hidden = !mine;
@@ -639,11 +678,11 @@ $("cheatHelp").append(
       : []
   )
 );
-const legend = ITEM_HELP.slice(1).map(() => document.createElement("span"));
+const legend = itemPicks.map(({ id }) => ({ id, text: document.createElement("span") }));
 $("legend").append(
-  ...legend.map((text, k) => {
+  ...legend.map(({ id, text }) => {
     const li = document.createElement("li");
-    li.append(ITEM_TILES[k + 1]!, text);
+    li.append(ITEM_TILES[id]!, text);
     return li;
   })
 );
@@ -651,7 +690,7 @@ $("legend").append(
 // Words that depend on what you play with: keys, or buttons on the screen.
 function describeControls() {
   flag("touch", touchMode);
-  legend.forEach((span, k) => (span.textContent = itemHelp(k + 1)));
+  for (const { id, text } of legend) text.textContent = itemHelp(id);
   for (const { id, box } of itemPicks) box.parentElement!.title = itemHelp(id);
   cheatInput.placeholder = touchMode ? "Type a code" : "Press Enter to type";
   $("cheatHow").textContent = touchMode

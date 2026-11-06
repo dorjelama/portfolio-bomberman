@@ -12,9 +12,9 @@ A 4-player online bomb-maze brawl on the farm, made for playing with friends in 
 - **Teams:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
 - **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one throw every 8 seconds; an orb over a ghost's head means it's ready). If your orb knocks out an opponent, you're back in their place, once per round. Get knocked out again and you're a spite ghost: back on the wall, and your orbs still knock people out and score, but they can't bring you back. Ghosts see everyone on Night Farm.
 - **Rounds:** 1:30 by default, then sudden death: the walls close in, three a second.
-- **Power-ups** (Skull, Swap and Gust are rare drops, so luck decides less):
+- **Power-ups**, with each one's default share of drops (35% of crates drop one). Swap and Gust are kept rare, so luck decides less. A room can change all of this under Rules in the lobby:
+  - Orb+ 22.5%, Fire+ 22.5%, Speed+ 11%, Skull 11%, Kick 7%, Shield 5.5%, Remote 5%, Glove 4.5%, Napalm 4%, Frost 3.5%, Gust 2%, Swap 1.5%
   - Orb+, Fire+, Speed+, Kick, Shield, Remote
-  - Pierce: blasts go through crates
   - Napalm: your fire burns for 2 s
   - Skull: a random 10 s curse: reversed, sluggish, butterfingers (orbs drop by themselves, and Remote and Glove stop working) or fizzle, all passed on by touch; or robbed (you lose every power-up, and it can't be passed on)
   - Glove: pick up an orb and carry it overhead (its fuse waits), then throw it over walls the way you face; it wraps around the edge
@@ -25,7 +25,7 @@ A 4-player online bomb-maze brawl on the farm, made for playing with friends in 
 - **Feel:**
   - Sound effects and an original chiptune loop, synthesised in the browser (no audio files), with Sound and Music toggles.
   - Gamepads work.
-  - Phones and tablets work: touch controls, an arena that fills the screen either way up, and a little buzz on Android (Vibrate in the header turns it off). See Controls below.
+  - Phones and tablets work: touch controls, an arena that fills the screen either way up, and on Android the phone buzzes when you're knocked out (Vibrate in the header turns it off). See Controls below.
   - Rollback corrections glide instead of snapping.
   - The lobby shows match wins for the evening.
   - KO feed, "Close call!" when someone's blast just misses you, and an announcer (DOUBLE KO!, COMEBACK!, FINAL TWO!, OOPS!...). Each player switches these on or off for their own screen, next to the volume sliders.
@@ -39,6 +39,7 @@ A 4-player online bomb-maze brawl on the farm, made for playing with friends in 
   - LIGHTSOUT: Night Farm darkness for 8 s on everyone's screen but yours.
   - HOLYCOW and BUMPERCROP need you standing; the other five work from the rim as a ghost. A code goes in as part of one tick's input, so rollback keeps everyone in sync.
 - **Everything is switchable:** the Game and Map pickers, a checkbox per power-up (the Skull covers every curse), and the room rules.
+  - **Drop rates:** under Rules, set how many crates drop a power-up and how often each one comes up. Each number counts against the others that are ticked, and the % beside it shows the share that works out to, live as you type. "Reset power-ups" puts the defaults back. A new room takes its creator's last rates, like the other rules.
 
 ## Run it
 
