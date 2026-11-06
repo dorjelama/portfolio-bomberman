@@ -20,29 +20,29 @@ const ITEM_HELP = [
   "Remote: your orbs wait for X / Shift",
   "Pierce: blasts go straight through bushes",
   "Napalm: your fire burns for 2 seconds",
-  "Skull: a random 10 s curse: reversed, sluggish, butterfingers (orbs drop by themselves, no Remote or Glove) or fizzle, which you pass on by touch; or robbed: you lose every power-up, and it stays with you",
-  "Glove: hold X / Shift on (or facing) an orb to carry it, let go to throw it over walls the way you face",
+  "Skull: a random 10 s curse you pass on by touch, or Robbed: you lose every power-up",
+  "Glove: hold X / Shift by an orb to carry it, let go to throw it over walls",
   "Swap: instantly trade places with a random opponent",
   "Frost: your blasts leave ice for 5 seconds",
   "Gust: blows every orb on the ground the way you face",
 ];
-// Per game, by MODES index: the win condition first. Short for the Ready screen, full for the lobby and the Games panel.
+// Per game, by MODES index: the win condition first. One line for the lobby and the Ready screen, a little more for the Games panel.
 const MODE_HINTS = [
-  "Last one standing wins",
+  "Last one standing wins.",
   "Most carrots at 0:00 wins. Knocked out? You drop half.",
-  "Last one standing wins. Pass the potato before it goes off!",
+  "Last one standing wins. Bump into someone to pass the potato before it goes off!",
 ];
 const MODE_HELP = [
-  "Win: be the last trainer (or team) standing. At 0:00 the walls close in; with Sudden death off, time running out is a draw.",
-  "Win: hold the most carrots when the clock hits 0:00 (teams add theirs up; a tie is a draw). Break bushes to find carrots and walk over them to pick them up. Get knocked out and half your carrots spill nearby for anyone to grab; you're back at your corner 2 seconds later. No ghosts, and the walls don't close in.",
-  "Win: be the last trainer (or team) standing. At Go one player gets the potato, with a timer on their name tag. Walk into someone to pass it on; the timer keeps running. Whoever holds it at 0 is knocked out, and a fresh potato goes to someone else. Orbs work as usual.",
+  "Last one (or team) standing wins. At 0:00 the walls close in, or it's a draw with Sudden death off.",
+  "Most carrots at 0:00 wins; teams add theirs up. Break bushes to find carrots. Knocked out? You drop half and you're back 2 s later.",
+  "Last one standing wins. Bump into someone to pass the potato; its timer keeps running. Whoever holds it at 0 is out.",
 ];
 const TEAM_NAMES = ["Teal & Green", "Red & Purple"]; // team = seat % 2
 // End-of-match awards: [stat, title, how to say the number]. Only shown when someone scored at least 1.
 const AWARDS: [keyof Stats, string, (n: number) => string][] = [
   ["kos", "Most knockouts", (n) => `${n} KO${n === 1 ? "" : "s"}`],
-  ["comebacks", "Comeback kid", (n) => `back from the wall ×${n}`],
-  ["curses", "Hot potato", (n) => `passed on ${n} curse${n === 1 ? "" : "s"}`],
+  ["comebacks", "Comeback kid", (n) => `${n} comeback${n === 1 ? "" : "s"}`],
+  ["curses", "Hot potato", (n) => `passed ${n} curse${n === 1 ? "" : "s"}`],
   ["bushes", "Bush whacker", (n) => `${n} bush${n === 1 ? "" : "es"}`],
   ["pickups", "Collector", (n) => `${n} power-up${n === 1 ? "" : "s"}`],
   ["crops", "Top farmer", (n) => `${n} carrot${n === 1 ? "" : "s"}`],
@@ -406,8 +406,14 @@ function showLobby() {
   );
   $<HTMLInputElement>("bots").checked = l.bots;
   $("tally").textContent = l.tally.map((e) => `${e.you ? "You" : e.name} ${e.wins}`).join(" · ");
-  showAwards($("lastAwards"), lastAwards);
-  showAwards($("roomAwards"), awards(l.totals.map((e) => ({ name: e.you ? "You" : e.name, stats: e.stats }))));
+  // One awards list up front: the match that just ended (or tonight's, after a reload). Tonight's sits folded
+  // underneath, and only when it says something different.
+  const night = awards(l.totals.map((e) => ({ name: e.you ? "You" : e.name, stats: e.stats })));
+  const top = lastAwards.length ? lastAwards : night;
+  $("awardsHead").textContent = lastAwards.length ? "Last match awards" : "Awards tonight";
+  showAwards($("lastAwards"), top);
+  showAwards($("roomAwards"), night);
+  $("nightAwards").hidden = JSON.stringify(night) === JSON.stringify(top);
   mapPick.value = String(l.settings.map);
   modePick.value = l.settings.teams ? "teams" : "ffa";
   winsPick.value = String(l.settings.winRounds);
@@ -415,7 +421,7 @@ function showLobby() {
   revengePick.checked = l.settings.revenge;
   shrinkPick.checked = l.settings.shrink;
   gamePick.value = String(l.settings.mode);
-  $("gameHelp").textContent = MODE_HELP[l.settings.mode] ?? "";
+  $("gameHelp").textContent = MODE_HINTS[l.settings.mode] ?? "";
   revengePick.disabled = shrinkPick.disabled = l.settings.mode === HARVEST; // Harvest respawns you and runs to 0:00
   for (const { id, box } of itemPicks) box.checked = !!(l.settings.items & (1 << id));
   const mine = l.seats.find((s) => s?.you);
@@ -448,37 +454,44 @@ $("legend").append(
 );
 
 // ---------- awards ----------
-let lastAwards: string[] = []; // from the match that just ended, shown again in the lobby
+interface Award {
+  title: string;
+  who: string;
+  says: string;
+}
+let lastAwards: Award[] = []; // from the match that just ended, shown again in the lobby
 
-function awards(players: { name: string; stats: Stats }[]) {
+function awards(players: { name: string; stats: Stats }[]): Award[] {
   return AWARDS.flatMap(([key, title, say]) => {
     const best = Math.max(...players.map((p) => p.stats[key]));
-    if (best < 1) return [];
     const who = players.flatMap((p) => (p.stats[key] === best ? [p.name] : []));
-    return [`${title}: ${who.join(" & ")} (${say(best)})`];
+    if (best < 1 || who.length > players.length / 2) return []; // shared by most of the room: nobody stood out
+    return [{ title, who: who.join(" & "), says: say(best) }];
   });
 }
 
-function showAwards(list: HTMLElement, items: string[]) {
+// Two short lines each: the award, then who got it and for what.
+function showAwards(list: HTMLElement, items: Award[]) {
   list.replaceChildren(
-    ...items.map((text) => {
+    ...items.map(({ title, who, says }) => {
       const li = document.createElement("li");
-      li.textContent = text;
+      li.append(title, Object.assign(document.createElement("span"), { textContent: `${who} · ${says}` }));
       return li;
     })
   );
 }
 
-// ---------- knockout log: "Pema knocked out Bot 2", "Bot 2's ghost knocked out you, and Bot 2 is back!" ----------
+// ---------- knockout log: "Pema KO'd Bot 2", "Bot 2's ghost KO'd you: Bot 2's back!" ----------
 function sentence(k: Knockout) {
   const name = (i: number, start: boolean) => (i === me ? (start ? "You" : "you") : nameOf(i));
-  if (k.how === "wall") return `${name(k.victim, true)} got crushed by the walls`;
-  if (k.how === "tractor") return `${name(k.victim, true)} got run over by the tractor`;
-  if (k.how === "potato") return k.victim === me ? "Your potato went off" : `${nameOf(k.victim)}'s potato went off`;
-  if (k.how === "self") return k.victim === me ? "You knocked yourself out" : `${nameOf(k.victim)} knocked themselves out`;
-  const by = k.how === "ghost" ? (k.by === me ? "Your ghost" : `${nameOf(k.by)}'s ghost`) : name(k.by, true);
-  const text = `${by} knocked out ${k.how === "team" ? "teammate " : ""}${name(k.victim, false)}`;
-  return k.back ? `${text}, and ${k.by === me ? "you're" : `${nameOf(k.by)} is`} back!` : text;
+  const whose = (i: number) => (i === me ? "Your" : `${nameOf(i)}'s`);
+  if (k.how === "wall") return `Walls crushed ${name(k.victim, false)}`;
+  if (k.how === "tractor") return `Tractor ran over ${name(k.victim, false)}`;
+  if (k.how === "potato") return `${whose(k.victim)} potato went off`;
+  if (k.how === "self") return k.victim === me ? "You KO'd yourself" : `${nameOf(k.victim)} KO'd themselves`;
+  const by = k.how === "ghost" ? `${whose(k.by)} ghost` : name(k.by, true);
+  const text = `${by} KO'd ${k.how === "team" ? "teammate " : ""}${name(k.victim, false)}`;
+  return k.back ? `${text}: ${k.by === me ? "you're" : `${nameOf(k.by)}'s`} back!` : text;
 }
 
 let lastLog = "";
@@ -486,13 +499,17 @@ function showLog(g: Game) {
   const key = `${JSON.stringify(g.log)}|${me}|${roster.map((r) => r.name)}`; // whole log: a rewind can swap an entry
   if (key === lastLog) return;
   lastLog = key;
-  $("matchLog").replaceChildren(
-    ...[...g.log].reverse().map((k) => {
-      const li = document.createElement("li");
-      li.append(Object.assign(document.createElement("b"), { textContent: `R${k.round} ` }), sentence(k));
-      return li;
-    })
-  );
+  // Newest first, under one "Round N" line per round rather than a tag on every entry.
+  const items: HTMLLIElement[] = [];
+  let round = -1;
+  for (const k of [...g.log].reverse()) {
+    if (k.round !== round) {
+      round = k.round;
+      items.push(Object.assign(document.createElement("li"), { className: "round", textContent: `Round ${round}` }));
+    }
+    items.push(Object.assign(document.createElement("li"), { textContent: sentence(k) }));
+  }
+  $("matchLog").replaceChildren(...items);
 }
 
 // ---------- kill feed and announcer: worked out from the knockout log alone, so a rewind corrects them too ----------
@@ -633,7 +650,7 @@ function hud() {
   const score = g.players.map((p, i) => `${seats()[i]}:${nameOf(i)}:${p.wins}:${p.alive || g.phase === "ready"}:${p.crops}`).join(",");
 
   const shownAwards = tl && g.phase === "over" ? lastAwards : [];
-  const key = [score, g.opts.winRounds, timer, title, sub, toast, inLobby, connected, me, shownAwards].join("|");
+  const key = [score, g.opts.winRounds, timer, title, sub, toast, inLobby, connected, me, JSON.stringify(shownAwards)].join("|");
   if (key === lastHud) return;
   lastHud = key;
   showAwards($("awards"), shownAwards);

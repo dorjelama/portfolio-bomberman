@@ -64,10 +64,14 @@
       #room .awards:empty, #matchLog:empty { display: block; }
       #tally:empty::before, #room ul:empty::before, #matchLog:empty::before { content: "Nothing yet"; color: var(--dim); }
       #matchLog { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 9px; }
-      #matchLog b { color: var(--dim); font-weight: normal; }
-      .awards { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; text-align: left; font-size: 9px; }
+      #matchLog .round { color: var(--dim); }
+      #matchLog .round:not(:first-child) { margin-top: 6px; }
+      #nightAwards summary { cursor: pointer; color: var(--accent); }
+      #nightAwards[open] summary { margin-bottom: 8px; }
+      .awards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; text-align: left; font-size: 9px; }
       .awards:empty { display: none; }
       .awards li::before { content: "★ "; color: var(--accent); }
+      .awards span { display: block; padding-left: 2ch; color: var(--dim); }
       #tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
       #tags span { position: absolute; transform: translate(-50%, -100%); font-size: clamp(7px, 0.9vw, 10px); line-height: 1; white-space: nowrap; padding: 2px 3px; background: rgb(20 20 40 / 0.65); border-radius: 2px; }
       #tags span[hidden] { display: none; }
@@ -186,7 +190,7 @@
               <div class="settings">
                 <label>Round time <select id="time"></select></label>
                 <label><input type="checkbox" id="revenge" /> Revenge ghosts</label>
-                <label><input type="checkbox" id="shrink" /> Sudden death (walls close in at 0:00; off = draw)</label>
+                <label title="Off: a round still going at 0:00 is a draw"><input type="checkbox" id="shrink" /> Sudden death: walls close in at 0:00</label>
               </div>
               <p class="help">Power-ups that can drop:</p>
               <div id="itemPicks"></div>
@@ -198,12 +202,14 @@
       </div>
 
       <aside id="room" class="panel" aria-label="This room">
-        <h2>Tonight</h2>
+        <h2>Wins tonight</h2>
         <p id="tally"></p>
-        <h2>Last match awards</h2>
+        <h2 id="awardsHead">Last match awards</h2>
         <ul id="lastAwards" class="awards"></ul>
-        <h2>Awards tonight</h2>
-        <ul id="roomAwards" class="awards"></ul>
+        <details id="nightAwards" hidden>
+          <summary>Awards tonight</summary>
+          <ul id="roomAwards" class="awards"></ul>
+        </details>
       </aside>
 
       <aside id="knockouts" class="panel" aria-label="Knockouts">
@@ -214,8 +220,8 @@
 
       <p class="help">
         <span id="who"></span>
-        Move: arrows / WASD. Drop orb: Space / Z. Detonate (Remote) or hold to carry, let go to throw (Glove): X / Shift.
-        Gamepad: D-pad or stick, A drops, B detonates / carries, A / Start = ready.
+        Move: arrows / WASD. Orb: Space / Z. Remote / Glove: X / Shift.
+        Gamepad: A = orb, B = Remote / Glove, Start = ready.
       </p>
 
       <section class="panel" aria-label="Games">
