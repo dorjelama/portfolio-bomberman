@@ -1,16 +1,18 @@
 import { Timeline } from "../shared/netcode.ts";
 import {
-  ACT, BOMB, CHEAT_CODES, CHEAT_SHIFT, COLS, CROP, CURSES, DOWN, GHOST_RELOAD, HARVEST, HOLY_TICKS, LANES, LEFT, MAPS, MODES, NIGHT, RIGHT,
-  ROBBED, ROUND_CHOICES, ROWS, TICK_HZ, TILE, UP, cheatBlock, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor, type Claim, type Game,
-  type Knockout, type Stats,
+  ACT, BOMB, BUTTERFINGERS, CHEAT_CODES, CHEAT_SHIFT, COLS, CROP, CURSES, DARK_TICKS, DOWN, GHOST_RELOAD, GLOVE, HARVEST, HOLY_TICKS, LANES, LEFT,
+  MAPS, MODES, NIGHT, REMOTE, RIGHT, ROBBED, ROUND_CHOICES, ROWS, SNAP_TICKS, TICK_HZ, TILE, TOPSY_TICKS, UP, cheatBlock, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor,
+  type Claim, type Game, type Knockout, type Stats,
 } from "../shared/sim.ts";
 import { music, setVolume, sfx, unlock, volume } from "./audio.ts";
 import { CROWN_TOP, render } from "./render.ts";
-import { COLORS, CROWN_IMG, ITEM_TILES, TRAINERS } from "./sprites.ts";
+import { COLORS, CROWN_IMG, ITEM_TILES, ORBS, TRAINERS } from "./sprites.ts";
+import { button, releaseTouch, stick, touch } from "./touch.ts";
 
 const TICK_MS = 1000 / TICK_HZ;
 const MARGIN = 2; // extra ticks of lead, so jitter doesn't make our inputs late
 const MAX_STEPS = 8; // ticks simulated per frame while catching up
+// {act} is the Remote / Glove control: X / Shift on a keyboard, that power-up's own button on a touchscreen.
 const ITEM_HELP = [
   "",
   "Orb+: carry one more orb at a time",
@@ -18,15 +20,16 @@ const ITEM_HELP = [
   "Speed+: walk faster",
   "Kick: walk into an orb to send it sliding",
   "Shield: survive one blast",
-  "Remote: your orbs wait for X / Shift",
+  "Remote: your orbs wait for {act}",
   "Pierce: blasts go straight through crates",
   "Napalm: your fire burns for 2 seconds",
   "Skull: a random 10 s curse you pass on by touch, or Robbed: you lose every power-up",
-  "Glove: hold X / Shift by an orb to carry it, let go to throw it over walls",
+  "Glove: hold {act} by an orb to carry it, let go to throw it over walls",
   "Swap: instantly trade places with a random opponent",
   "Frost: your blasts leave ice for 5 seconds",
   "Gust: blows every orb on the ground the way you face",
 ];
+const itemHelp = (id: number) => ITEM_HELP[id].replace("{act}", touchMode ? `the ${ITEM_HELP[id].split(":")[0]} button` : "X / Shift");
 // Per game, by MODES index: the win condition first. One line for the lobby and the Ready screen, a little more for the Games panel.
 const MODE_HINTS = [
   "Last one standing wins.",
@@ -37,6 +40,17 @@ const MODE_HELP = [
   "Last one (or team) standing wins. At 0:00 the walls close in, or it's a draw with Sudden death off.",
   "Most carrots at 0:00 wins; teams add theirs up. Break crates to find carrots. Knocked out? You drop half and you're back 2 s later.",
   "Last one standing wins. Bump into someone to pass the potato; its timer keeps running. Whoever holds it at 0 is out.",
+];
+// What each cheat code does, by CHEAT_CODES index: for the Cheats panel and the tooltips in the cheat box.
+const CHEAT_HELP = [
+  "",
+  `Blasts and tractors can't touch you for ${HOLY_TICKS / TICK_HZ} s, and your curse lifts. Walls and the potato still can. You get a halo.`,
+  "Orbs, fire and speed to the top.",
+  `Every opponent who isn't cursed gets Reversed for ${TOPSY_TICKS / TICK_HZ} s.`,
+  "Every orb on the ground goes off, yours too.",
+  "Six power-ups sprout on open ground (carrots too, in Harvest).",
+  `The grass turns to ice for ${SNAP_TICKS / TICK_HZ} s.`,
+  `Night Farm darkness for ${DARK_TICKS / TICK_HZ} s on everyone's screen but yours.`,
 ];
 const TEAM_NAMES = ["Teal & Green", "Red & Purple"]; // team = seat % 2
 // End-of-match awards: [stat, title, how to say the number]. Only shown when someone scored at least 1.
@@ -71,11 +85,11 @@ const storage = {
 };
 
 // ---------- display extras: each player switches these for their own screen ----------
-const prefs = { feed: true, close: true, callout: true };
+const prefs = { feed: true, close: true, callout: true, buzz: true };
 try {
   Object.assign(prefs, JSON.parse(storage.get(() => localStorage, "prefs") ?? "{}"));
 } catch {}
-for (const k of ["feed", "close", "callout"] as const) {
+for (const k of ["feed", "close", "callout", "buzz"] as const) {
   const box = $<HTMLInputElement>(`${k}Pref`);
   box.checked = !!prefs[k];
   box.onchange = () => {
@@ -84,6 +98,25 @@ for (const k of ["feed", "close", "callout"] as const) {
     box.blur(); // so Space goes back to the game
   };
 }
+
+// ---------- touchscreens: last input wins, so a phone with a gamepad, or a laptop with a touchscreen, gets what it's using ----------
+let touchMode = matchMedia("(pointer: coarse)").matches;
+const canBuzz = "vibrate" in navigator;
+const vibrate = (pattern: number | number[]) => {
+  if (touchMode && prefs.buzz && canBuzz) navigator.vibrate(pattern);
+};
+const flag = (name: string, on: boolean) => document.documentElement.classList.toggle(name, on);
+function setTouch(on: boolean) {
+  if (on === touchMode) return;
+  touchMode = on;
+  if (!on) releaseTouch();
+  describeControls();
+}
+addEventListener("pointerdown", (e) => e.pointerType !== "mouse" && setTouch(true), true);
+addEventListener("keydown", (e) => {
+  // Typing in a field doesn't count: a phone's own keyboard is how you type a cheat.
+  if (!(e.target instanceof Element && e.target.closest("input, select")) && !e.repeat) setTouch(false);
+}, true);
 
 // ---------- room: the URL is the invite, as in Critter Catch ----------
 let room = new URLSearchParams(location.search).get("room")?.toLowerCase() ?? "";
@@ -210,8 +243,22 @@ addEventListener("keydown", (e) => {
   tapped |= k;
 });
 addEventListener("keyup", (e) => (held &= ~keyOf(e)));
-addEventListener("blur", () => (held = 0));
+addEventListener("blur", () => {
+  held = 0;
+  releaseTouch();
+});
 addEventListener("keydown", unlock); // browsers only start audio from a user gesture
+addEventListener("touchend", unlock); // iOS only counts the end of a tap
+addEventListener("click", unlock);
+
+// Touch: the stick and buttons (touch.ts) only make input bits. A button buzzes when pressed, like a real one.
+stick($("stick"));
+button($("orbBtn"), BOMB);
+button($("actBtn"), ACT);
+touch.onPress = () => vibrate(12);
+const liveTouch = () => touchMode && document.documentElement.classList.contains("live");
+addEventListener("contextmenu", (e) => liveTouch() && e.preventDefault()); // a long press would open the menu
+document.addEventListener("gesturestart", (e) => liveTouch() && e.preventDefault()); // iOS pinch-zoom
 
 
 // ---------- cheats: typed codes, when the room allows them ----------
@@ -238,23 +285,36 @@ function closeBox() {
   cheatInput.value = "";
   setTyping("");
   cheatInput.blur();
+  cheatBox.classList.remove("open");
 }
 addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || !canType() || (e.target instanceof Element && e.target.closest("input, button, select"))) return;
   e.preventDefault();
   cheatInput.focus();
 });
+// On a touchscreen the box lives behind a Cheat button and opens over the top of the screen, clear of the keyboard.
+// Putting the keyboard away closes it.
+$("cheatBtn").onclick = () => {
+  cheatBox.classList.add("open");
+  cheatInput.focus();
+};
+cheatInput.onblur = () => {
+  if (touchMode) closeBox();
+};
 cheatInput.onfocus = () => {
   held = tapped = 0; // stop walking while you type
+  releaseTouch();
   cheatSays("", "");
 };
 cheatInput.oninput = () => {
-  cheatInput.value = cheatInput.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 12);
-  setTyping(cheatInput.value);
+  const text = cheatInput.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 12);
+  if (text !== cheatInput.value) cheatInput.value = text; // only when it changed: rewriting mid-word confuses phone keyboards
+  setTyping(text);
 };
 cheatInput.onkeydown = (e) => {
-  if (e.key === "Escape") return closeBox();
-  if (e.key !== "Enter") return;
+  if (e.key === "Escape") closeBox(); // a block, not an expression: an on- handler returning false cancels the key
+};
+cheatBox.onsubmit = (e) => {
   e.preventDefault();
   const cheat = CHEAT_CODES.indexOf(cheatInput.value);
   if (cheat < 1) {
@@ -271,6 +331,7 @@ cheatInput.onkeydown = (e) => {
     cheatSays("", "good");
   }
   if (why) sfx.buzz();
+  if (why && touchMode) flash(cheatNote.textContent ?? ""); // the box is about to close, so say why up top
   closeBox();
 };
 
@@ -284,6 +345,7 @@ function showCodes(g: Game) {
   $("cheatCodes").replaceChildren(
     ...CHEAT_CODES.slice(1).map((code, k) => {
       const li = document.createElement("li");
+      li.title = CHEAT_HELP[k + 1];
       const claim = g.claims.find((c) => c.cheat === k + 1);
       li.append(Object.assign(document.createElement("span"), { className: claim ? "claimed" : "", textContent: code }));
       if (claim) li.append(Object.assign(document.createElement("span"), { className: `p${seats()[claim.by] + 1}`, textContent: nameOf(claim.by) }));
@@ -340,6 +402,8 @@ let lastWarn = false;
 const claimed = new Set<string>(); // cheats we've already played the jingle for, by round and code
 let backUntil = 0; // show "You're back in!" until then
 let closeUntil = 0; // ...and "Close call!"
+let [flashText, flashUntil] = ["", 0]; // ...and a one-off message
+const flash = (text: string) => ([flashText, flashUntil] = [text, performance.now() + 2000]);
 function listen(g: Game) {
   for (const b of g.bombs) {
     if (!heard.has(b.id)) {
@@ -355,6 +419,7 @@ function listen(g: Game) {
   if ([...lastOrbs].some(([id, tile]) => !orbs.has(id) && g.fire[tile] > 0)) sfx.boom(); // gone in flames, not just un-predicted
   lastOrbs = orbs;
   if (g.players.some((p, i) => lastAlive[i] && !p.alive)) sfx.ko();
+  if (lastAlive[me] && !g.players[me]?.alive) vibrate([90, 50, 160]); // you're out
   if (g.phase === "play" && lastPhase === "play" && g.players.some((p, i) => lastAlive[i] === false && p.alive)) {
     (g.opts.mode === HARVEST ? sfx.respawn : sfx.comeback)(); // Harvest respawns are often: save the fanfare for a ghost's comeback
     if (lastAlive[me] === false && g.players[me]?.alive) backUntil = performance.now() + 2000;
@@ -411,6 +476,7 @@ document.addEventListener("visibilitychange", () => {
   // Going to the background: stop walking (the server would repeat our last input) and stop simulating.
   stale = true;
   held = tapped = 0;
+  releaseTouch();
   if (tl && me >= 0) send({ type: "in", t: tl.g.tick + delay, i: (lastSent = 0) });
 });
 
@@ -475,7 +541,15 @@ for (const k of ["sound", "music"] as const) {
     slider.blur(); // so the arrow keys go back to the game
   };
 }
+// On a phone, the invite goes straight to the share sheet (WhatsApp, Messages...); elsewhere it's copied.
+const canShare = () => touchMode && "share" in navigator;
 $("copy").onclick = async () => {
+  if (canShare()) {
+    try {
+      await navigator.share({ title: "Boom Orbs", text: "Come and play Boom Orbs with me", url: location.href });
+    } catch {} // closed without sharing
+    return;
+  }
   try {
     await navigator.clipboard.writeText(location.href);
     $("copy").textContent = "Copied!";
@@ -483,6 +557,12 @@ $("copy").onclick = async () => {
     $("copy").textContent = location.href;
   }
 };
+// Full screen hides the browser's bars: more arena on a phone. iPhones don't offer it to pages, so there's no button.
+const fullBtn = $("fullscreen");
+fullBtn.hidden = !document.fullscreenEnabled;
+fullBtn.onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
+document.addEventListener("fullscreenchange", () => (fullBtn.textContent = document.fullscreenElement ? "Exit full screen" : "Full screen"));
+$("buzzLabel").hidden = !canBuzz;
 
 function showLobby() {
   if (!lobby) return;
@@ -552,13 +632,34 @@ $("games").append(
     Object.assign(document.createElement("dd"), { textContent: MODE_HELP[i] }),
   ])
 );
+$("cheatHelp").append(
+  ...CHEAT_CODES.flatMap((code, i) =>
+    i
+      ? [Object.assign(document.createElement("dt"), { textContent: code }), Object.assign(document.createElement("dd"), { textContent: CHEAT_HELP[i] })]
+      : []
+  )
+);
+const legend = ITEM_HELP.slice(1).map(() => document.createElement("span"));
 $("legend").append(
-  ...ITEM_HELP.slice(1).map((text, k) => {
+  ...legend.map((text, k) => {
     const li = document.createElement("li");
     li.append(ITEM_TILES[k + 1]!, text);
     return li;
   })
 );
+
+// Words that depend on what you play with: keys, or buttons on the screen.
+function describeControls() {
+  flag("touch", touchMode);
+  legend.forEach((span, k) => (span.textContent = itemHelp(k + 1)));
+  for (const { id, box } of itemPicks) box.parentElement!.title = itemHelp(id);
+  cheatInput.placeholder = touchMode ? "Type a code" : "Press Enter to type";
+  $("cheatHow").textContent = touchMode
+    ? "tap the Cheat button, type a code and tap Go"
+    : "press Enter, type a code and press Enter again (Esc gives up)";
+  $("copy").textContent = canShare() ? "Share invite link" : "Copy invite link";
+  lastHud = lastPad = ""; // redraw: the toasts name keys or buttons
+}
 
 // ---------- awards ----------
 interface Award {
@@ -597,6 +698,7 @@ function sentence(k: Knockout) {
   if (k.how === "potato") return k.by >= 0 ? `${name(k.by, true)} cooked ${name(k.victim, false)}` : `${whose(k.victim)} potato went off`;
   if (k.how === "self") return k.victim === me ? "You KO'd yourself" : `${nameOf(k.victim)} KO'd themselves`;
   const by = k.how === "ghost" ? `${whose(k.by)} ghost` : name(k.by, true);
+  if (k.how === "team" && k.victim === me) return `Teammate ${by} KO'd you`; // not "KO'd teammate you"
   const text = `${by} KO'd ${k.how === "team" ? "teammate " : ""}${name(k.victim, false)}`;
   return k.back ? `${text}: ${k.by === me ? "you're" : `${nameOf(k.by)}'s`} back!` : text;
 }
@@ -780,6 +882,10 @@ function hud() {
       ? ""
       : g.roundTick < 45
         ? "GO!"
+        : performance.now() < flashUntil
+        ? flashText
+        : me < 0 && touchMode
+        ? "Watching: you can join after this match" // there's no room for the line under the arena
         : performance.now() < backUntil
           ? "You're back in!"
           : performance.now() < closeUntil
@@ -794,7 +900,7 @@ function hud() {
             ? you.returned
               ? "Ghost: no comeback, but your orbs still hit" // a spite ghost: already came back once this round
               : ghostReady(g, you)
-              ? "Ghost: run along the wall, Space lobs an orb in"
+              ? `Ghost: run along the wall, ${touchMode ? "tap Orb to lob one in" : "Space lobs an orb in"}`
               : `Ghost: run along the wall. Next orb in ${Math.ceil((GHOST_RELOAD - (g.tick - Math.max(you.threwAt, you.diedAt))) / TICK_HZ)}s`
             : hurry && g.roundTick < limit + 3 * TICK_HZ
               ? "Hurry! The walls are closing in"
@@ -803,17 +909,20 @@ function hud() {
 
   const shownAwards = tl && g.phase === "over" ? lastAwards : [];
   const cheats = !!tl && !inLobby && me >= 0 && !!g.opts.cheats;
-  const key = [score, g.opts.winRounds, timer, title, tint, sub, toast, inLobby, connected, me, JSON.stringify(shownAwards), cheats].join("|");
+  const key = [score, g.opts.winRounds, timer, title, tint, sub, toast, inLobby, connected, me, JSON.stringify(shownAwards), cheats, touchMode].join("|");
   if (key === lastHud) return;
   lastHud = key;
+  flag("inlobby", connected && inLobby); // on a small screen the lobby then takes the arena's place
   showAwards($("awards"), shownAwards);
   cheatBox.hidden = !cheats;
   $("board").hidden = inLobby || !tl;
   $("timer").textContent = timer;
   $("timer").classList.toggle("hurry", hurry);
   // One card per player, split either side of the timer: by team in 2v2, otherwise first half / second half.
+  // A phone held sideways puts each half in its own column, either side of the arena.
   const onLeft = (i: number) => (g.opts.teams ? g.opts.teams[i] === 0 : i < g.players.length / 2);
   const cards = g.players.map((p, i) => scoreCard(g, i, p.alive || g.phase === "ready"));
+  cards.forEach((card, i) => card.classList.add(onLeft(i) ? "l" : "r"));
   $("board").replaceChildren(...cards.filter((_, i) => onLeft(i)), $("timer"), ...cards.filter((_, i) => !onLeft(i)));
   $("who").textContent = tl && !inLobby && me < 0 ? "Watching: you can join after this match." : "";
   $("lobby").hidden = !connected || !inLobby;
@@ -825,12 +934,45 @@ function hud() {
   $("toast").classList.toggle("show", !!toast);
 }
 
+// Touch buttons: Orb shows how many orbs you have left and dims when it can't drop one (or, as a ghost, until your next
+// throw). The Remote / Glove button only shows once you have one of them, with its icon, and dims under Butterfingers.
+$<HTMLImageElement>("orbIcon").src = ORBS[0].toDataURL();
+$<HTMLImageElement>("remoteIcon").src = ITEM_TILES[REMOTE]!.toDataURL();
+$<HTMLImageElement>("gloveIcon").src = ITEM_TILES[GLOVE]!.toDataURL();
+let lastPad = "";
+function padState(g: Game) {
+  const p = g.players[me];
+  const fumble = p?.curse === BUTTERFINGERS;
+  const left = p?.alive ? Math.max(0, p.bombs - g.bombs.filter((b) => b.owner === me).length) : -1;
+  const orb = !!p && g.phase === "play" && (p.alive ? left > 0 && !fumble : p.ghost && ghostReady(g, p));
+  const [remote, glove] = [!!p?.alive && p.remote, !!p?.alive && p.glove];
+  const key = [orb, left, remote, glove, fumble, canType()].join();
+  if (key === lastPad) return;
+  lastPad = key;
+  $("orbBtn").classList.toggle("off", !orb);
+  $("orbsLeft").textContent = left >= 0 ? String(left) : "";
+  $("actBtn").classList.toggle("none", !remote && !glove);
+  $("actBtn").classList.toggle("off", fumble);
+  $("remoteIcon").hidden = !remote;
+  $("gloveIcon").hidden = !glove;
+  $("cheatBtn").hidden = !canType();
+}
+
 // ---------- loop ----------
 function frame(now: number) {
   const pad = padInput();
   const padPressed = pad & ~padPrev;
   padPrev = pad;
+  if (pad) setTouch(false); // picked up a gamepad: put the on-screen controls away
   if (padPressed & (BOMB | START) && connected && lobby && !lobby.playing) toggleReady();
+  // In a match (playing or watching): on a touchscreen the page becomes the game, see index.html.
+  const live = !!tl && !(lobby && !lobby.playing);
+  if (live !== document.documentElement.classList.contains("live")) {
+    flag("live", live);
+    releaseTouch();
+    if (live) scrollTo(0, 0);
+  }
+  flag("watching", me < 0);
   if (tl && offset !== null && !stale) {
     // Run far enough ahead of the server that our inputs reach it before it simulates their tick.
     const target = Math.floor(now / TICK_MS + offset + rtt / TICK_MS + MARGIN - delay);
@@ -842,8 +984,8 @@ function frame(now: number) {
     while (tl.g.tick < target && steps++ < MAX_STEPS) {
       const t = tl.g.tick + 1;
       if (me >= 0) {
-        const input = ((held | tapped | pad) & ~START) | (cheatTap << CHEAT_SHIFT);
-        tapped = cheatTap = 0;
+        const input = ((held | tapped | pad | touch.bits | touch.tapped) & ~START) | (cheatTap << CHEAT_SHIFT);
+        tapped = cheatTap = touch.tapped = 0;
         tl.setMine(t + delay, input);
         if (input !== lastSent) send({ type: "in", t: t + delay, i: (lastSent = input) });
       }
@@ -859,7 +1001,8 @@ function frame(now: number) {
     }
   }
   music(volume.music > 0); // lobby too, once the browser has allowed audio
-  if (!canType() && (cheatInput.value || document.activeElement === cheatInput)) closeBox();
+  if (!canType() && (cheatInput.value || document.activeElement === cheatInput || cheatBox.classList.contains("open"))) closeBox();
+  if (live && touchMode) padState(shown);
   render(ctx, shown, seats(), tl?.drift, me, crowned(shown));
   nameTags(tl && !(lobby && !lobby.playing) ? shown : null, tl?.drift);
   hud();
@@ -870,5 +1013,6 @@ function frame(now: number) {
   requestAnimationFrame(frame);
 }
 
+describeControls();
 connect();
 requestAnimationFrame(frame);

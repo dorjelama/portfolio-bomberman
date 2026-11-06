@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-visual" />
     <title>Boom Orbs</title>
     <meta name="description" content="A 4-player bomb-maze brawl on the farm, for playing with friends in the browser." />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='9' r='6' fill='%232b2f77' stroke='%231b1b2f'/%3E%3Crect x='2' y='8' width='12' height='2' fill='%23ff6b4a'/%3E%3Ccircle cx='9' cy='2' r='1.5' fill='%23ffd23f'/%3E%3C/svg%3E" />
@@ -126,10 +126,11 @@
       .panel h2 { margin: 0 0 8px; font-size: 11px; color: var(--accent); }
       #legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
       #legend li { display: flex; gap: 10px; align-items: center; }
-      #games { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; }
-      #games dt { color: var(--accent); }
-      #games dd { margin: 0; }
-      @media (max-width: 640px) { #games { grid-template-columns: 1fr; } #games dd { margin-bottom: 8px; } }
+      :is(#games, #cheatHelp) { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; }
+      :is(#games, #cheatHelp) dt { color: var(--accent); }
+      :is(#games, #cheatHelp) dd { margin: 0; }
+      #cheatHelp { margin-top: 12px; }
+      @media (max-width: 640px) { :is(#games, #cheatHelp) { grid-template-columns: 1fr; } :is(#games, #cheatHelp) dd { margin-bottom: 8px; } }
       #legend canvas { width: 32px; flex: none; }
       #lobby { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px; overflow: auto; background: rgb(20 20 40 / 0.75); }
       #lobby[hidden] { display: none; }
@@ -160,6 +161,97 @@
       .p2 { color: var(--p2); }
       .p3 { color: var(--p3); }
       .p4 { color: var(--p4); }
+
+      /* ---------- phones and tablets ---------- */
+      [hidden] { display: none !important; } /* so display rules below never bring back something hidden */
+      html:not(.touch) .touch-only, html.touch .keys-only { display: none; }
+      header button { padding: 6px 8px; }
+      /* iOS zooms the page into any text field under 16px, and stays zoomed. */
+      html.touch :is(#name, #cheatInput, select) { font-size: 16px; }
+      html.touch :is(#name, #cheatInput) { width: 0; } /* they stretch to fill anyway; at 16px their default 20 letters would widen the page */
+
+      /* Small screens, in the lobby: the lobby leaves the arena box (too small to hold it) and becomes part of the page. */
+      @media (max-width: 640px), (max-height: 520px) and (max-width: 1299px) {
+        html.inlobby .play { --stage-w: 100%; }
+        html.inlobby .stage { border: 0; background: none; }
+        html.inlobby .stage > canvas, html.inlobby #tags { display: none; }
+        html.inlobby #lobby { position: static; padding: 0; background: none; }
+      }
+
+      /* During a match on a touchscreen the page becomes the game: no scrolling, no zooming, arena as big as fits,
+         controls beside it (sideways) or under it (upright). */
+      #pad { display: none; }
+      html.touch.live, html.touch.live body { overflow: hidden; overscroll-behavior: none; }
+      html.touch.live main {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100dvh; max-width: none; padding: 6px; gap: 6px;
+        grid-template-columns: minmax(0, 1fr) var(--stage-w) minmax(0, 1fr);
+        grid-template-rows: auto auto auto minmax(0, 1fr);
+        grid-auto-flow: dense; /* each card takes the first free row in its column, not one past the buttons */
+        --side: clamp(132px, 19vw, 230px); /* the narrowest a side column gets */
+        --stage-w: min(100vw - 24px - 2 * var(--side), (100dvh - 20px) * 240 / 208 + 8px);
+        -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+      }
+      html.touch.live :is(main, main *) { touch-action: none; }
+      html.touch.live :is(header, main > .help, main > section, #room, #knockouts) { display: none; }
+      html.touch.live :is(.play, #pad) { display: contents; }
+      html.touch.live .play { --stage-w: inherit; }
+      html.touch.live .stage { grid-column: 2; grid-row: 1 / -1; align-self: center; }
+      html.watching #pad { visibility: hidden; }
+      /* Compact scoreboard: the name tags in the arena already say who's who. */
+      html.touch.live #timer { font-size: 12px; padding: 6px 8px; min-width: 0; }
+      html.touch.live #board .card { gap: 4px; padding: 2px 6px 2px 2px; min-width: 0; }
+      html.touch.live #board .card img { width: 22px; height: 22px; }
+      html.touch.live #board .pips { gap: 2px; }
+      html.touch.live #board .pips i { width: 7px; height: 7px; border-width: 1px; }
+      html.touch.live #board .crops img { width: 12px; height: 12px; }
+      html.touch.live #board .who { font-size: 8px; }
+      /* Sideways: timer and the left-hand cards over the stick, the right-hand cards over the buttons. */
+      @media (orientation: landscape) {
+        html.touch.live #board { display: contents; }
+        html.touch.live #timer { grid-column: 1; grid-row: 1; }
+        html.touch.live #board .card { flex-wrap: wrap; }
+        html.touch.live #board .card.l { grid-column: 1; }
+        html.touch.live #board .card.r { grid-column: 3; }
+        html.touch.live #board .who { flex: 1 1 calc(100% - 30px); max-width: none; } /* name beside the face, pips underneath */
+        html.touch.live #stick { grid-column: 1; grid-row: 4; }
+        html.touch.live #btns { grid-column: 3; grid-row: 3 / 5; }
+      }
+      /* Upright: one row of cards on top, the arena full width, the controls underneath. */
+      @media (orientation: portrait) {
+        html.touch.live main {
+          grid-template-columns: 1fr 1fr;
+          grid-template-rows: auto auto minmax(0, 1fr);
+          --stage-w: min(100vw - 12px, (100dvh - 230px) * 240 / 208 + 8px);
+        }
+        html.touch.live #board { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 6px; }
+        html.touch.live #timer { order: 0; }
+        html.touch.live #board .who { display: none; }
+        html.touch.live .stage { grid-column: 1 / -1; grid-row: 2; }
+        html.touch.live #stick { grid-column: 1; grid-row: 3; }
+        html.touch.live #btns { grid-column: 2; grid-row: 3; }
+      }
+      #stick, #btns { position: relative; min-height: 0; --stick: clamp(96px, 28vmin, 160px); --orb: clamp(68px, 21vmin, 120px); --act: clamp(54px, 16vmin, 92px); }
+      /* The stick rests here, faint, and jumps to wherever your thumb lands. */
+      #stick .base { position: absolute; left: 50%; top: 55%; width: var(--stick); height: var(--stick); translate: -50% -50%; border: 4px solid var(--dim); border-radius: 50%; background: rgb(34 34 74 / 0.6); opacity: 0.45; pointer-events: none; }
+      #stick.on .base { opacity: 1; }
+      #stick .knob { position: absolute; inset: 0; margin: auto; width: 44%; height: 44%; border: 4px solid var(--bg); border-radius: 50%; background: var(--ink); }
+      .tbtn { position: absolute; display: flex; gap: 2px; align-items: center; justify-content: center; border: 4px solid var(--ink); border-radius: 50%; background: rgb(34 34 74 / 0.8); }
+      .tbtn::before { content: ""; position: absolute; inset: -10px; border-radius: 50%; } /* a bigger target than it looks */
+      .tbtn img { width: 45%; image-rendering: pixelated; pointer-events: none; }
+      .tbtn.down { background: var(--accent); scale: 0.94; }
+      .tbtn.off { opacity: 0.4; }
+      #orbBtn { right: 8%; bottom: 12%; width: var(--orb); height: var(--orb); }
+      #orbsLeft { position: absolute; top: -6px; right: -6px; min-width: 24px; padding: 3px 4px; font-size: 10px; font-weight: normal; line-height: 1; text-align: center; color: var(--ink); background: var(--bg); border: 2px solid var(--ink); border-radius: 12px; }
+      #orbsLeft:empty { display: none; }
+      /* Up and to the left of Orb, where a right thumb rocks to. It only appears once you have a Remote or Glove. */
+      #actBtn { right: calc(8% + var(--orb) * 0.8); bottom: calc(12% + var(--orb) * 0.95); width: var(--act); height: var(--act); }
+      #actBtn.none { visibility: hidden; }
+      #actBtn img { width: 40%; }
+      #cheatBtn { position: absolute; top: 0; right: 0; padding: 6px 8px; font-size: 9px; color: var(--accent); background: none; border: 2px dashed var(--accent); }
+      /* The cheat box opens over the top of the screen, clear of the phone's keyboard. */
+      html.touch.live #cheatBox { position: fixed; top: 6px; left: 6px; right: 6px; z-index: 5; width: auto; margin: 0; background: var(--panel); }
+      html.touch.live #cheatBox:not(.open) { display: none; }
+      html.touch.live #cheatInput { -webkit-user-select: text; user-select: text; }
     </style>
   </head>
   <body>
@@ -172,6 +264,8 @@
           <label class="vol"><input type="checkbox" id="feedPref" /> KO feed</label>
           <label class="vol"><input type="checkbox" id="closePref" /> Close calls</label>
           <label class="vol"><input type="checkbox" id="calloutPref" /> Announcer</label>
+          <label class="vol touch-only" id="buzzLabel" hidden><input type="checkbox" id="buzzPref" /> Vibrate</label>
+          <button id="fullscreen" class="touch-only" type="button" hidden>Full screen</button>
         </div>
       </header>
 
@@ -228,11 +322,11 @@
         </section>
       </div>
 
-      <div id="cheatBox" hidden>
-        <label>Cheat: <input id="cheatInput" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Press Enter to type" /></label>
+      <form id="cheatBox" hidden>
+        <label>Cheat: <input id="cheatInput" maxlength="12" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" placeholder="Press Enter to type" /></label>
         <span id="cheatNote" aria-live="polite"></span>
         <ul id="cheatCodes" aria-label="Cheat codes"></ul>
-      </div>
+      </form>
 
       <aside id="room" class="panel" aria-label="This room">
         <h2>Wins tonight</h2>
@@ -251,10 +345,26 @@
       </aside>
       </div>
 
+      <!-- Touch controls, shown during a match on a touchscreen. Pointer-only: keyboards and gamepads have their own. -->
+      <div id="pad" aria-hidden="true">
+        <div id="stick"><div class="base"><div class="knob"></div></div></div>
+        <div id="btns">
+          <button id="cheatBtn" type="button" hidden>Cheat</button>
+          <div id="actBtn" class="tbtn"><img id="remoteIcon" alt="" /><img id="gloveIcon" alt="" /></div>
+          <div id="orbBtn" class="tbtn"><img id="orbIcon" alt="" /><b id="orbsLeft"></b></div>
+        </div>
+      </div>
+
       <p class="help">
         <span id="who"></span>
-        Move: arrows / WASD. Orb: Space / Z. Remote / Glove: X / Shift.
-        Gamepad: A = orb, B = Remote / Glove, Start = ready.
+        <span class="keys-only">
+          Move: arrows / WASD. Orb: Space / Z. Remote / Glove: X / Shift.
+          Gamepad: A = orb, B = Remote / Glove, Start = ready.
+        </span>
+        <span class="touch-only">
+          Move: put your left thumb down anywhere on the left and slide it. Orb: the round button on the right.
+          Remote / Glove: the button above it, once you have one. Turn the phone sideways for a bigger arena.
+        </span>
       </p>
 
       <section class="panel" aria-label="Games">
@@ -265,6 +375,17 @@
       <section class="panel" aria-label="Power-ups">
         <h2>Power-ups</h2>
         <ul id="legend"></ul>
+      </section>
+
+      <section class="panel" aria-label="Cheats">
+        <h2>Cheats</h2>
+        <p class="help">
+          Off unless the room ticks Cheats under Rules in the lobby. Then, during a round, <span id="cheatHow">press Enter, type a code and press Enter again (Esc gives up)</span>.
+          Your farmer stands still while you type, and everyone sees what you're typing, letter by letter.
+          Each code works once a round, for whoever types it first, and you get one a round.
+          HOLYCOW and BUMPERCROP need you standing; the rest work as a ghost too.
+        </p>
+        <dl id="cheatHelp"></dl>
       </section>
     </main>
     <script type="module" src="/main.js"></script>

@@ -1,0 +1,4 @@
+- [Identity proposals](project_identity_proposals.md): 2026-11-06 rename/colour/award pitches (farmer, crates, Bad apple...), pending user decision
+- [Playtest findings](project_playtest_findings.md): bot playtest results for Harvest, Hot Potato, Night Farm, Tractor Lane + open human playtests
+- [Shared browser](feedback_shared_browser.md): Playwright uses the user's profile; restore room settings, screenshots go in .playwright-mcp/
+- [Cheats redesign](project_cheats_redesign.md): typed cheat codes, user decisions (per-player typing, live typing relay) + pending code list

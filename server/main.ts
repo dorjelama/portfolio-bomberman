@@ -82,9 +82,9 @@ const freeSeat = (room: Room) => [0, 1, 2, 3].find((s) => !room.clients.some((c)
 const rosterIndex = (room: Room, c: Client) => room.roster.findIndex((r) => r.client === c);
 
 function sendLobby(room: Room) {
-  // The crown is earned: the player with the most match wins tonight, on their own. Nobody before the first win,
-  // on a tie, or while the bots lead.
-  const ranked = [...room.tally].sort(([, a], [, b]) => b.wins - a.wins);
+  // The crown is earned: the player with the most match wins tonight, on their own. Nobody before the first win
+  // or on a tie. Bots can't wear it, so they don't count (in 2v2 a bot teammate's shared win would tie you).
+  const ranked = [...room.tally].filter(([k]) => k !== "bots").sort(([, a], [, b]) => b.wins - a.wins);
   const champ = ranked[0] && ranked[0][1].wins > (ranked[1]?.[1].wins ?? 0) ? ranked[0][0] : "";
   for (const c of room.clients) {
     send(c, {

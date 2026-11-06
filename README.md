@@ -25,6 +25,7 @@ A 4-player online bomb-maze brawl on the farm, made for playing with friends in 
 - **Feel:**
   - Sound effects and an original chiptune loop, synthesised in the browser (no audio files), with Sound and Music toggles.
   - Gamepads work.
+  - Phones and tablets work: touch controls, an arena that fills the screen either way up, and a little buzz on Android (Vibrate in the header turns it off). See Controls below.
   - Rollback corrections glide instead of snapping.
   - The lobby shows match wins for the evening.
   - KO feed, "Close call!" when someone's blast just misses you, and an announcer (DOUBLE KO!, COMEBACK!, FINAL TWO!, OOPS!...). Each player switches these on or off for their own screen, next to the volume sliders.
@@ -61,6 +62,13 @@ Controls:
 - Detonate (with Remote), or hold to carry and let go to throw (with Glove): X or Shift
 - Cheats, when the room turns them on: Enter to type a code, Enter to use it, Esc to give up
 - Gamepad: D-pad or left stick to move, A to drop, B or X to detonate. In the lobby, A or Start toggles ready.
+- Touchscreen (`client/touch.ts`):
+  - Move: put your left thumb down anywhere left of the arena (or under it, upright) and slide. The stick appears where your thumb lands and follows it. Rolling your thumb towards a corner pre-turns, like holding two keys.
+  - Orb: the round button on the right. Its badge counts the orbs you have left, and it dims when you can't drop one.
+  - Remote / Glove: the button above Orb. It appears once you pick one up.
+  - Cheats: the Cheat button opens a box at the top. Type, then tap Go; putting the keyboard away gives up.
+  - During a match the page becomes the game: no scrolling or zooming. Sideways gives the biggest arena, with the scoreboard and controls either side. Upright puts them above and below. On Android, Full screen in the header hides the browser bars (iPhones don't allow it).
+  - Invite links open the share sheet. Whatever you last used wins: press a key or a gamepad button and the touch controls go away; touch the screen and they're back.
 
 ## How it stays in sync
 
@@ -83,6 +91,7 @@ shared/*.test.ts        rules, determinism, and a server + laggy clients simulat
 server/main.ts          static files, rooms, lobby, 60 Hz match loop
 server/dev.ts           dev entry: esbuild watch + server
 client/main.ts          input, connection, lobby, HUD, frame loop
+client/touch.ts         touch controls: the stick and the Orb and Remote / Glove buttons
 client/render.ts        drawing
 client/audio.ts         synthesised sound effects + music loop
 client/sprites.ts       pixel art for orbs and icons; cuts the arena tiles and players out of client/art
