@@ -118,6 +118,10 @@ export const sfx = {
     tone(520, 0.12, "square", 0.18, 880);
   },
   potatoTick: (fast: boolean) => tone(fast ? 1568 : 1175, 0.04, "square", 0.14),
+  // Cheats: someone else's keystroke in the cheat box, a code that didn't work, and a code that did (everyone hears it).
+  keystroke: () => tone(1400, 0.015, "square", 0.06),
+  buzz: () => tone(110, 0.15, "square", 0.2),
+  cheat: () => notes([[440, 0.06], [523, 0.06], [659, 0.06], [880, 0.12]], "square", 0.18),
 };
 
 // ---------- music: a 4-bar loop in A minor, 16 steps per bar ----------

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { InputQueue, Timeline } from "./netcode.ts";
-import { BOMB, CHEAT_SHIFT, DOWN, GOD, LEFT, RIGHT, UP, createGame, tickGame, type Game } from "./sim.ts";
+import { BOMB, CHEAT_SHIFT, DOWN, HOLYCOW, LEFT, RIGHT, UP, createGame, tickGame, type Game } from "./sim.ts";
 
 test("input queue: future inputs wait for their tick, late ones keep their order, gaps repeat the last", () => {
   const q = new InputQueue();
@@ -16,8 +16,8 @@ test("input queue: future inputs wait for their tick, late ones keep their order
   q.push(9999, UP, 15); // absurdly far ahead: ignored
   q.push(16.5, UP, 15); // not a tick
   assert.equal(q.take(16), 0);
-  q.push(17, BOMB | (GOD << CHEAT_SHIFT), 16); // a cheat tap rides along in the input
-  assert.equal(q.take(17), BOMB | (GOD << CHEAT_SHIFT));
+  q.push(17, BOMB | (HOLYCOW << CHEAT_SHIFT), 16); // a typed cheat code rides along in the input
+  assert.equal(q.take(17), BOMB | (HOLYCOW << CHEAT_SHIFT));
 });
 
 test("laggy clients predict, roll back and end up with exactly the server's game", () => {

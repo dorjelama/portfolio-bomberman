@@ -78,12 +78,12 @@ function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: n
   ctx.drawImage(TRAINERS[seat][p.dir][frame], x - 10, y - 16); // 20x20 farmer, feet 3 px below centre; the hat shows the colour
   if (crown) ctx.drawImage(CROWN_IMG, x - 5, y - CROWN_TOP); // the hat's top is 14 px up in every frame, so it sits flush
   ctx.globalAlpha = 1;
-  if (p.alive && p.god) {
-    // God mode (a cheat): a halo over the hat, so everyone can see who's cheating.
+  if (p.alive && p.god && (p.god > 2 * TICK_HZ || (t >> 3) % 2)) {
+    // HOLY COW (a cheat): a halo over the hat, so everyone can see who's cheating. It blinks in the last 2 s.
     ctx.strokeStyle = "#ffd23f";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.ellipse(x, Math.max(3, y - 18), 5, 1.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y - 16, 5, 1.5, 0, 0, Math.PI * 2); // just over the hat, so a name tag pinned to the top edge can't cover it
     ctx.stroke();
     ctx.lineWidth = 1;
   }
@@ -224,5 +224,5 @@ export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], 
     drawOrb(ctx, { ...b, y: b.y - Math.round(lift) * PX }, t);
   }
   tractors(ctx, g);
-  if (g.map === NIGHT) night(ctx, g, me, nudge);
+  if (g.map === NIGHT || (g.dark > 0 && g.darkBy !== me)) night(ctx, g, me, nudge); // LIGHTS OUT: dark for all but whoever typed it
 }

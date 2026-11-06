@@ -39,14 +39,26 @@ export const LEFT = 4;
 export const RIGHT = 8;
 export const BOMB = 16;
 export const ACT = 32; // detonate (Remote)
-// Cheats (a room rule, off by default): a tap puts a cheat id in bits 6..10 for one tick. Ids up to GUST hand you
-// that power-up, as if you'd walked over it; then these three.
+// Cheats (a room rule, off by default) are typed codes. The client matches what you type to a code and sends its
+// index in bits 6..10 of one tick's input. Each code works once a round, for whoever types it first, and each player
+// gets one a round.
 export const CHEAT_SHIFT = 6;
 export const INPUT_BITS = (1 << 11) - 1; // everything an input can hold
-export const MAX_OUT = 14; // orbs, fire and speed to the top
-export const GOD = 15; // toggle: blasts and tractors can't touch you (walls and the potato still can, so rounds still end)
-export const CURE = 16; // lifts your curse (what Robbed took stays gone)
 export const cheatOf = (input: number) => (input >> CHEAT_SHIFT) & 31;
+export const CHEAT_CODES = ["", "HOLYCOW", "BUMPERCROP", "TOPSYTURVY", "POPCORN", "RAINDANCE", "COLDSNAP", "LIGHTSOUT"];
+export const HOLYCOW = 1; // 10 s untouchable by blasts and tractors (walls and the potato still get you), and your curse lifts
+export const BUMPERCROP = 2; // orbs, fire and speed to the top
+export const TOPSYTURVY = 3; // every opponent who isn't cursed gets Reversed
+export const POPCORN = 4; // every orb on the ground goes off, yours too
+export const RAINDANCE = 5; // power-ups (and, in Harvest, carrots) sprout on open ground
+export const COLDSNAP = 6; // the grass turns to ice for a while
+export const LIGHTSOUT = 7; // Night Farm darkness on everyone else's screen
+const ALIVE_ONLY = [HOLYCOW, BUMPERCROP]; // the rest work from the rim too, so ghosts have something to type
+export const HOLY_TICKS = 10 * TICK_HZ;
+export const TOPSY_TICKS = 6 * TICK_HZ;
+export const SNAP_TICKS = 8 * TICK_HZ;
+export const DARK_TICKS = 8 * TICK_HZ;
+const RAIN_TILES = 6;
 export const DX = [0, 0, -1, 1];
 export const DY = [-1, 1, 0, 0];
 
@@ -141,6 +153,13 @@ export interface Knockout {
   back: boolean;
 }
 
+// A cheat code someone typed this round. Nobody else can use that code until the next round.
+export interface Claim {
+  tick: number;
+  by: number;
+  cheat: number; // index into CHEAT_CODES
+}
+
 // Counted over a whole match, for the end-of-match awards.
 export interface Stats {
   kos: number; // opponents knocked out
@@ -175,7 +194,7 @@ export interface Player {
   napalm: boolean;
   glove: boolean;
   frost: boolean;
-  god: boolean; // cheat: blasts and tractors can't touch you
+  god: number; // HOLYCOW: ticks left of blasts and tractors not touching you
   crops: number; // Harvest: held right now
   potato: number; // Hot Potato: ticks until it goes off, 0 = not holding it
   passer: number; // Hot Potato: who handed it to you, -1 = it was handed out fresh
@@ -230,6 +249,9 @@ export interface Game {
   nextBomb: number;
   shrink: number; // index into SPIRAL of the next wall to fall
   log: Knockout[]; // every knockout this match, in order, for the summary
+  claims: Claim[]; // cheats typed this round, in order
+  dark: number; // LIGHTSOUT: ticks left
+  darkBy: number; // ...and who typed it: their screen stays lit
   players: Player[];
 }
 
@@ -305,7 +327,7 @@ function freshPlayer(id: number): Player {
     napalm: false,
     glove: false,
     frost: false,
-    god: false,
+    god: 0,
     crops: 0,
     potato: 0,
     passer: -1,
@@ -350,6 +372,9 @@ export function createGame(players: number, seed: number, opts: Partial<Options>
     nextBomb: 1,
     shrink: 0,
     log: [],
+    claims: [],
+    dark: 0,
+    darkBy: -1,
     players: Array.from({ length: players }, (_, id) => freshPlayer(id)),
   };
   if (g.opts.mode === HARVEST) Object.assign(g.opts, { shrink: false, revenge: false }); // you respawn instead, and 0:00 counts the crops
@@ -385,6 +410,9 @@ function newRound(g: Game) {
   g.thaw = Array(n).fill(0);
   g.bombs = [];
   g.shrink = 0;
+  g.claims = [];
+  g.dark = 0;
+  g.darkBy = -1;
   g.roundTick = 0;
   g.roundWinner = -1;
   g.phase = "ready";
@@ -421,6 +449,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     return;
   }
   g.roundTick++;
+  if (g.dark) g.dark--;
 
   for (let i = 0; i < g.fire.length; i++) {
     if (g.fire[i]) g.fire[i]--;
@@ -434,6 +463,8 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     const id = (k + g.tick) % n;
     const p = g.players[id];
     const input = inputs[id] ?? 0;
+    const cheat = g.opts.cheats ? cheatOf(input) : 0;
+    if (cheat && cheat !== cheatOf(p.prev) && cheat < CHEAT_CODES.length && !cheatBlock(g, id, cheat)) useCheat(g, id, cheat); // once per tap
     if (p.alive) control(g, id, p, input);
     else if (p.ghost) haunt(g, id, p, input);
     else if (g.opts.mode === HARVEST && g.tick - p.diedAt >= RESPAWN_TICKS) respawn(g, id);
@@ -467,6 +498,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
   g.players.forEach((p, id) => {
     if (!p.alive) return;
     if (p.invuln) p.invuln--;
+    if (p.god) p.god--;
     const i = tileAt(p.x, p.y);
     const flattened = runOver(p.x, p.y, TILE);
     if (g.grid[i] === WALL) {
@@ -618,8 +650,6 @@ function control(g: Game, id: number, p: Player, raw: number) {
   if (p.potato) p.potato--;
   if (p.curseLeft && --p.curseLeft === 0) p.curse = 0;
   if (p.immune) p.immune--;
-  const cheat = g.opts.cheats ? cheatOf(raw) : 0;
-  if (cheat && cheat !== cheatOf(p.prev)) useCheat(g, id, p, cheat); // once per tap
   const input = p.curse === REVERSED ? flip(raw) : raw;
   const fumble = p.curse === BUTTERFINGERS; // orbs drop by themselves, and the button does nothing
   const act = fumble ? 0 : raw & ACT;
@@ -736,13 +766,35 @@ function catchCurse(p: Player, curse: number, left: number) {
   Object.assign(p, { bombs, range, speed, kick, remote, shield, pierce, napalm, glove, frost });
 }
 
-function useCheat(g: Game, id: number, p: Player, cheat: number) {
-  if (cheat <= GUST) pickUp(g, id, p, cheat);
-  else if (cheat === MAX_OUT) [p.bombs, p.range, p.speed] = [MAX_BOMBS, MAX_RANGE, SPEEDS.length - 1];
-  else if (cheat === GOD) p.god = !p.god;
-  else if (cheat === CURE) [p.curse, p.curseLeft] = [0, 0];
-  else return;
+// Why player id can't use a cheat right now, or "" if they can. The client asks the same question before sending one.
+export function cheatBlock(g: Game, id: number, cheat: number): "" | "taken" | "spent" | "out" {
+  const p = g.players[id];
+  if (g.claims.some((c) => c.cheat === cheat)) return "taken";
+  if (g.claims.some((c) => c.by === id)) return "spent"; // one a round
+  if (!p.alive && (!p.ghost || ALIVE_ONLY.includes(cheat))) return "out";
+  return "";
+}
+
+function useCheat(g: Game, id: number, cheat: number) {
+  const p = g.players[id];
+  g.claims.push({ tick: g.tick, by: id, cheat });
   p.stats.cheats++;
+  if (cheat === HOLYCOW) [p.god, p.curse, p.curseLeft] = [HOLY_TICKS, 0, 0];
+  else if (cheat === BUMPERCROP) [p.bombs, p.range, p.speed] = [MAX_BOMBS, MAX_RANGE, SPEEDS.length - 1];
+  else if (cheat === TOPSYTURVY) {
+    g.players.forEach((q, j) => q.alive && !q.curse && sideOf(g, j) !== sideOf(g, id) && catchCurse(q, REVERSED, TOPSY_TICKS));
+  } else if (cheat === POPCORN) {
+    for (const b of g.bombs) if (!b.hops) [b.remote, b.fuse] = [false, 0]; // on the ground: not flying, not carried
+  } else if (cheat === RAINDANCE) {
+    const standing = new Set(g.players.flatMap((q) => (q.alive ? [tileAt(q.x, q.y)] : [])));
+    const open = g.grid.flatMap((t, i) => (t === FLOOR && !g.items[i] && !g.fire[i] && !bombAt(g, i) && !standing.has(i) ? [i] : []));
+    for (let k = 0; k < RAIN_TILES && open.length; k++) {
+      const [i] = open.splice(Math.floor(rand(g) * open.length), 1);
+      g.items[i] = g.opts.mode === HARVEST && rand(g) < CROP_CHANCE ? CROP : rollItem(g, true);
+    }
+  } else if (cheat === COLDSNAP) {
+    g.floor.forEach((f, i) => f === GRASS && g.grid[i] !== WALL && ([g.floor[i], g.thaw[i]] = [ICE, SNAP_TICKS])); // thaws like Frost ice
+  } else if (cheat === LIGHTSOUT) [g.dark, g.darkBy] = [DARK_TICKS, id];
 }
 
 function pickUp(g: Game, id: number, p: Player, item: number) {
@@ -855,8 +907,9 @@ function slideKicked(g: Game) {
   }
 }
 
-function rollItem(g: Game) {
-  if (rand(g) >= DROP_CHANCE) return 0;
+// What a broken crate leaves: usually nothing, unless `sure`.
+function rollItem(g: Game, sure = false) {
+  if (!sure && rand(g) >= DROP_CHANCE) return 0;
   const weights = ITEM_WEIGHTS.map((w, id) => (g.opts.items & (1 << id) ? w : 0)); // switched-off power-ups never drop
   const total = weights.reduce((a, b) => a + b);
   let roll = rand(g) * total;

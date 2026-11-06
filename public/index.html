@@ -104,17 +104,24 @@
       #board .crops { display: flex; align-items: center; gap: 2px; color: var(--ink); }
       #board .crops img { width: 16px; height: 16px; }
       label:has(input:disabled) { opacity: 0.5; cursor: default; }
-      /* Cheat bar: under the arena, as wide as it. Dashed, so it reads as an extra rather than part of the game. */
-      #cheatBar { grid-column: 1 / -1; width: var(--stage-w); margin: 0 auto; padding: 6px 8px 8px; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; border: 2px dashed var(--accent); border-radius: 4px; }
-      #cheatBar[hidden] { display: none; }
-      #cheatBar:disabled { opacity: 0.5; }
-      #cheatBar legend { padding: 0 6px; color: var(--accent); }
-      #cheatBar button { display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: var(--panel); color: var(--ink); border: 2px solid var(--dim); border-radius: 2px; font-size: 9px; }
-      #cheatBar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-      #cheatBar:disabled button { cursor: default; }
-      #cheatBar img { width: 20px; height: 20px; image-rendering: pixelated; }
-      #cheatBar kbd { font: inherit; color: var(--dim); }
-      @media (min-width: 1300px) { #cheatBar { margin-top: 12px; } }
+      /* Cheat box: under the arena, as wide as it. Dashed, so it reads as an extra rather than part of the game. */
+      #cheatBox { grid-column: 1 / -1; width: var(--stage-w); margin: 0 auto; padding: 8px; display: grid; gap: 6px; border: 2px dashed var(--accent); border-radius: 4px; }
+      #cheatBox[hidden] { display: none; }
+      #cheatBox label { display: flex; gap: 8px; align-items: center; color: var(--accent); }
+      #cheatInput { font: inherit; flex: 1; min-width: 0; padding: 6px 8px; background: var(--bg); color: var(--ink); border: 2px solid var(--dim); letter-spacing: 1px; }
+      #cheatInput:focus { border-color: var(--accent); }
+      #cheatNote:empty { display: none; }
+      #cheatBox.bad { animation: shake 0.3s; }
+      #cheatBox.good { animation: flash 0.6s; }
+      @keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+      @keyframes flash { from { background: rgb(255 210 63 / 0.35); } to { background: transparent; } }
+      @media (prefers-reduced-motion: reduce) { #cheatBox.bad { animation: none; } }
+      #cheatCodes { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 9px; color: var(--dim); }
+      #cheatCodes li { display: grid; gap: 2px; align-content: start; }
+      #cheatCodes .claimed { text-decoration: line-through; }
+      #cheatCodes .fill { display: block; height: 3px; background: currentColor; }
+      #board .typed { color: var(--ink); letter-spacing: 1px; }
+      @media (min-width: 1300px) { #cheatBox { margin-top: 12px; } }
       .panel { background: var(--panel); border: 4px solid var(--ink); border-radius: 4px; padding: 12px; }
       .panel h2 { margin: 0 0 8px; font-size: 11px; color: var(--accent); }
       #legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px 20px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
@@ -210,7 +217,7 @@
                 <label>Round time <select id="time"></select></label>
                 <label><input type="checkbox" id="revenge" /> Revenge ghosts</label>
                 <label title="Off: a round still going at 0:00 is a draw"><input type="checkbox" id="shrink" /> Sudden death: walls close in at 0:00</label>
-                <label title="Everyone gets god mode, max out, lift curse and any power-up during a match"><input type="checkbox" id="cheats" /> Cheats</label>
+                <label title="Type cheat codes during a match. Each works once a round, for whoever types it first."><input type="checkbox" id="cheats" /> Cheats</label>
               </div>
               <p class="help">Power-ups that can drop:</p>
               <div id="itemPicks"></div>
@@ -221,9 +228,11 @@
         </section>
       </div>
 
-      <fieldset id="cheatBar" hidden>
-        <legend>Cheats</legend>
-      </fieldset>
+      <div id="cheatBox" hidden>
+        <label>Cheat: <input id="cheatInput" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Press Enter to type" /></label>
+        <span id="cheatNote" aria-live="polite"></span>
+        <ul id="cheatCodes" aria-label="Cheat codes"></ul>
+      </div>
 
       <aside id="room" class="panel" aria-label="This room">
         <h2>Wins tonight</h2>
@@ -246,7 +255,6 @@
         <span id="who"></span>
         Move: arrows / WASD. Orb: Space / Z. Remote / Glove: X / Shift.
         Gamepad: A = orb, B = Remote / Glove, Start = ready.
-        Cheats (when on): G god mode, M max out, C lift curse, 1–0 power-ups.
       </p>
 
       <section class="panel" aria-label="Games">

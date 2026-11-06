@@ -28,7 +28,15 @@ A 4-player online bomb-maze brawl on the farm, made for playing with friends in 
   - Rollback corrections glide instead of snapping.
   - The lobby shows match wins for the evening.
   - KO feed, "Close call!" when someone's blast just misses you, and an announcer (DOUBLE KO!, COMEBACK!, FINAL TWO!, OOPS!...). Each player switches these on or off for their own screen, next to the volume sliders.
-- **Cheats** (a room rule, off by default): during a match everyone gets a cheat bar under the arena, with keys. God mode (G) means blasts and tractors can't touch you; walls and the potato still can, so rounds still end. Everyone sees a halo over your hat. There's also Max out (M: orbs, fire and speed to the top), Lift curse (C) and any power-up (1 to 0 for the first ten, the bar for the rest). Cheats go through the input stream like a key press, so rollback keeps everyone in sync.
+- **Cheats** (a room rule, off by default): type codes during a match. Press Enter, type, and press Enter again (Esc gives up). Your farmer stands still while you type, and everyone sees what you're typing, letter by letter, in your name tag and on the scoreboard. Each code works once a round, for whoever types it first, and each player gets one a round. A knockout's shout beats a cheat's.
+  - HOLYCOW: blasts and tractors can't touch you for 10 s (walls and the potato still can), and your curse lifts. A halo shows over your hat.
+  - BUMPERCROP: orbs, fire and speed to the top.
+  - TOPSYTURVY: every opponent who isn't cursed gets Reversed for 6 s.
+  - POPCORN: every orb on the ground goes off, yours too.
+  - RAINDANCE: six power-ups sprout on open ground (carrots too, in Harvest).
+  - COLDSNAP: the grass turns to ice for 8 s.
+  - LIGHTSOUT: Night Farm darkness for 8 s on everyone's screen but yours.
+  - HOLYCOW and BUMPERCROP need you standing; the other five work from the rim as a ghost. A code goes in as part of one tick's input, so rollback keeps everyone in sync.
 - **Everything is switchable:** the Game and Map pickers, a checkbox per power-up (the Skull covers every curse), and the room rules.
 
 ## Run it
@@ -51,7 +59,7 @@ Controls:
 - Move: arrows or WASD
 - Drop an orb: Space or Z
 - Detonate (with Remote), or hold to carry and let go to throw (with Glove): X or Shift
-- Cheats, when the room turns them on: G god mode, M max out, C lift curse, 1 to 0 power-ups (or click the cheat bar)
+- Cheats, when the room turns them on: Enter to type a code, Enter to use it, Esc to give up
 - Gamepad: D-pad or left stick to move, A to drop, B or X to detonate. In the lobby, A or Start toggles ready.
 
 ## How it stays in sync

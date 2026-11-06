@@ -224,6 +224,12 @@ function handle(room: Room, c: Client, m: Record<string, unknown>) {
   } else if (m.type === "sync" && g && g.tick - c.lastSync >= TICK_HZ) {
     c.lastSync = g.tick;
     send(c, { type: "state", g });
+  } else if (m.type === "typing" && g?.opts.cheats && typeof m.text === "string") {
+    // What a player is typing in the cheat box, letter by letter, for everyone else to see. Display only: the code
+    // itself goes in as an input, so the sim never sees this.
+    const i = rosterIndex(room, c);
+    const text = m.text.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 12);
+    if (i >= 0) for (const o of room.clients) if (o !== c) send(o, { type: "typing", i, text });
   } else if (m.type === "name") {
     c.name = cleanName(m.name);
     sendLobby(room);

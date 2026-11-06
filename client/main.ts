@@ -1,7 +1,8 @@
 import { Timeline } from "../shared/netcode.ts";
 import {
-  ACT, BOMB, CHEAT_SHIFT, COLS, CROP, CURE, CURSES, DOWN, GHOST_RELOAD, GOD, HARVEST, LANES, LEFT, MAPS, MAX_OUT, MODES, NIGHT, RIGHT, ROBBED,
-  ROUND_CHOICES, ROWS, TICK_HZ, TILE, UP, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor, type Game, type Knockout, type Stats,
+  ACT, BOMB, CHEAT_CODES, CHEAT_SHIFT, COLS, CROP, CURSES, DOWN, GHOST_RELOAD, HARVEST, HOLY_TICKS, LANES, LEFT, MAPS, MODES, NIGHT, RIGHT,
+  ROBBED, ROUND_CHOICES, ROWS, TICK_HZ, TILE, UP, cheatBlock, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor, type Claim, type Game,
+  type Knockout, type Stats,
 } from "../shared/sim.ts";
 import { music, setVolume, sfx, unlock, volume } from "./audio.ts";
 import { CROWN_TOP, render } from "./render.ts";
@@ -174,6 +175,8 @@ function onMessage(m: any) {
     tl = new Timeline(m.g, m.you);
     heard.clear(); // orb ids start again from 1 in a new match
     tossed.clear();
+    claimed.clear();
+    typing = [];
     [roster, me, shown, stale] = [m.roster, m.you, tl.g, false];
     lastSent = m.g.players[m.you]?.prev ?? 0;
     delay = Math.min(4, Math.max(1, Math.round(rtt / TICK_MS / 4))); // more ping, a little more delay, fewer rewinds
@@ -184,6 +187,10 @@ function onMessage(m: any) {
     stale = false;
   } else if (m.type === "pong") rtt = rtt ? rtt * 0.8 + (performance.now() - m.t) * 0.2 : performance.now() - m.t;
   else if (m.type === "full") roomFull = true;
+  else if (m.type === "typing" && Number.isInteger(m.i) && typeof m.text === "string") {
+    if (m.text.length > (typing[m.i]?.length ?? 0)) sfx.keystroke(); // someone's racing you to a code
+    typing[m.i] = m.text;
+  }
 }
 setInterval(() => send({ type: "ping", t: performance.now() }), 1000);
 
@@ -206,18 +213,92 @@ addEventListener("keyup", (e) => (held &= ~keyOf(e)));
 addEventListener("blur", () => (held = 0));
 addEventListener("keydown", unlock); // browsers only start audio from a user gesture
 
-// Cheats, when the room allows them: G god mode, M max out, C lift curse, 1 to 9 and 0 the first ten power-ups.
-// A tap goes out as a cheat id in the input for one tick, so every client applies it on the same tick.
-const CHEAT_KEYS: Record<string, number> = { g: GOD, m: MAX_OUT, c: CURE };
-"1234567890".split("").forEach((k, i) => (CHEAT_KEYS[k] = i + 1));
+
+// ---------- cheats: typed codes, when the room allows them ----------
+// Enter opens the box (your farmer stops: typing is a risk), Enter uses the code, Esc gives up. The code goes out as its
+// index in one tick's input, so every client applies it on the same tick. Everyone sees what you type as you type it.
+const cheatBox = $("cheatBox");
+const cheatInput = $<HTMLInputElement>("cheatInput");
+const cheatNote = $("cheatNote");
 let cheatTap = 0;
+let typing: string[] = []; // what each player has in their cheat box right now, by sim index (yours too)
+const canType = () => !!tl && me >= 0 && !!shown.opts.cheats && shown.phase === "play";
+function cheatSays(text: string, how: "" | "bad" | "good") {
+  cheatNote.textContent = text;
+  cheatBox.classList.remove("bad", "good");
+  void cheatBox.offsetWidth; // restart the animation
+  if (how) cheatBox.classList.add(how);
+}
+function setTyping(text: string) {
+  if (me < 0 || typing[me] === text) return;
+  typing[me] = text;
+  send({ type: "typing", text });
+}
+function closeBox() {
+  cheatInput.value = "";
+  setTyping("");
+  cheatInput.blur();
+}
 addEventListener("keydown", (e) => {
-  const cheat = CHEAT_KEYS[e.key.toLowerCase()];
-  if (!cheat || e.repeat || !tl || me < 0 || !shown.opts.cheats) return;
-  if (e.ctrlKey || e.metaKey || e.altKey || (e.target instanceof Element && e.target.closest("input, button, select"))) return;
+  if (e.key !== "Enter" || !canType() || (e.target instanceof Element && e.target.closest("input, button, select"))) return;
   e.preventDefault();
-  cheatTap = cheat;
+  cheatInput.focus();
 });
+cheatInput.onfocus = () => {
+  held = tapped = 0; // stop walking while you type
+  cheatSays("", "");
+};
+cheatInput.oninput = () => {
+  cheatInput.value = cheatInput.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 12);
+  setTyping(cheatInput.value);
+};
+cheatInput.onkeydown = (e) => {
+  if (e.key === "Escape") return closeBox();
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const cheat = CHEAT_CODES.indexOf(cheatInput.value);
+  if (cheat < 1) {
+    sfx.buzz();
+    return cheatSays("Not a cheat", "bad"); // the box stays open for another go
+  }
+  const why = canType() ? cheatBlock(shown, me, cheat) : "out";
+  const by = shown.claims.find((c) => c.cheat === cheat)?.by;
+  if (why === "taken" && by !== me) cheatSays(`${nameOf(by!)} got there first`, "bad");
+  else if (why === "taken" || why === "spent") cheatSays("One cheat a round", "bad");
+  else if (why === "out") cheatSays(shown.players[me]?.ghost ? "Not while you're a ghost" : "Not while you're knocked out", "bad");
+  else {
+    cheatTap = cheat;
+    cheatSays("", "good");
+  }
+  if (why) sfx.buzz();
+  closeBox();
+};
+
+// The codes under the box. A claimed one is struck through with who has it; while someone types one, a bar in their
+// colour fills under it.
+let lastCodes = "";
+function showCodes(g: Game) {
+  const key = JSON.stringify([cheatBox.hidden, g.claims, typing, seats(), me, roster.map((r) => r.name)]);
+  if (cheatBox.hidden || key === lastCodes) return;
+  lastCodes = key;
+  $("cheatCodes").replaceChildren(
+    ...CHEAT_CODES.slice(1).map((code, k) => {
+      const li = document.createElement("li");
+      const claim = g.claims.find((c) => c.cheat === k + 1);
+      li.append(Object.assign(document.createElement("span"), { className: claim ? "claimed" : "", textContent: code }));
+      if (claim) li.append(Object.assign(document.createElement("span"), { className: `p${seats()[claim.by] + 1}`, textContent: nameOf(claim.by) }));
+      else {
+        typing.forEach((t, i) => {
+          if (!t || !code.startsWith(t)) return;
+          const bar = Object.assign(document.createElement("i"), { className: `fill p${seats()[i] + 1}` });
+          bar.style.width = `${(t.length / code.length) * 100}%`;
+          li.append(bar);
+        });
+      }
+      return li;
+    })
+  );
+}
 addEventListener("pointerdown", unlock);
 
 // Gamepads: any connected pad plays as you. D-pad or left stick moves, A drops an orb, B / X detonates.
@@ -256,6 +337,7 @@ let lastFire: number[] = [];
 let lastPotato = 0;
 let lastBeat = ""; // which tick of the potato's countdown we last played
 let lastWarn = false;
+const claimed = new Set<string>(); // cheats we've already played the jingle for, by round and code
 let backUntil = 0; // show "You're back in!" until then
 let closeUntil = 0; // ...and "Close call!"
 function listen(g: Game) {
@@ -303,7 +385,7 @@ function listen(g: Game) {
   lastHurry = hurry;
 
   const p = g.players[me];
-  const kit = p ? [p.bombs, p.range, p.speed, +p.kick, +p.remote, +p.shield, +p.pierce, +p.napalm, +p.glove, +p.frost, p.crops, +p.god] : [];
+  const kit = p ? [p.bombs, p.range, p.speed, +p.kick, +p.remote, +p.shield, +p.pierce, +p.napalm, +p.glove, +p.frost, p.crops] : [];
   if (p?.alive && kit.some((v, i) => v > lastKit[i])) sfx.pickup();
   lastKit = kit;
   if (p?.curse && !lastCurse) sfx.curse();
@@ -317,6 +399,12 @@ function listen(g: Game) {
   lastBeat = beat;
   if (g.shrink > lastShrink) sfx.tick(g.shrink % 2 === 0); // a wall fell
   lastShrink = g.shrink;
+  for (const c of g.claims) {
+    const key = `${g.round}:${c.cheat}`;
+    if (claimed.has(key)) continue;
+    claimed.add(key);
+    sfx.cheat(); // everyone hears it, with the shout
+  }
 }
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) return send({ type: "sync" });
@@ -376,26 +464,6 @@ for (const el of [gamePick, mapPick, modePick, winsPick, timePick, revengePick, 
   el.onchange = sendSettings;
 }
 
-// The cheat bar under the arena, for players in a match with cheats on. Same cheats as the keys.
-const cheatBar = $<HTMLFieldSetElement>("cheatBar");
-function cheatButton(cheat: number, name: string, help: string, icon?: HTMLCanvasElement) {
-  const b = Object.assign(document.createElement("button"), { type: "button", title: help });
-  b.append(icon ? Object.assign(new Image(), { src: icon.toDataURL(), alt: name }) : name);
-  const key = Object.keys(CHEAT_KEYS).find((k) => CHEAT_KEYS[k] === cheat);
-  if (key) b.append(Object.assign(document.createElement("kbd"), { textContent: key.toUpperCase() }));
-  b.onclick = () => {
-    cheatTap = cheat;
-    b.blur(); // so Space goes back to the game
-  };
-  return b;
-}
-const godButton = cheatButton(GOD, "God mode", "Blasts and tractors can't touch you. Walls and the potato still can.");
-cheatBar.append(
-  godButton,
-  cheatButton(MAX_OUT, "Max out", "Orbs, fire and speed to the top"),
-  cheatButton(CURE, "Lift curse", "Ends your curse. What Robbed took stays gone."),
-  ...itemPicks.map(({ id }) => cheatButton(id, ITEM_HELP[id].split(":")[0], ITEM_HELP[id], ITEM_TILES[id]!))
-);
 const toggleReady = () => send({ type: "ready", ready: !lobby?.seats.find((s) => s?.you)?.ready });
 $("ready").onclick = toggleReady;
 for (const k of ["sound", "music"] as const) {
@@ -554,9 +622,27 @@ function showLog(g: Game) {
 // ---------- KO feed and announcer: worked out from the knockout log alone, so a rewind corrects them too ----------
 const FEED_TICKS = 4 * TICK_HZ;
 let lastFeed = "";
+// One line per cheat typed: "Pema flipped everyone".
+function cheatLine(g: Game, c: Claim) {
+  const who = c.by === me ? "You" : nameOf(c.by);
+  return [
+    "",
+    `${who} ${c.by === me ? "are" : "is"} untouchable for ${HOLY_TICKS / TICK_HZ}s`,
+    `${who} maxed out`,
+    `${who} flipped everyone`,
+    `${who} set off every orb`,
+    `${who} made ${g.opts.mode === HARVEST ? "carrots and power-ups" : "power-ups"} sprout`,
+    `${who} froze the farm`,
+    `${who} hit the lights`,
+  ][c.cheat];
+}
+
 function showFeed(g: Game) {
-  const recent = tl && prefs.feed ? g.log.filter((k) => g.tick - k.tick < FEED_TICKS).slice(-4).reverse() : [];
-  const lines = recent.map(sentence);
+  const fresh = (tick: number) => g.tick - tick < FEED_TICKS;
+  const kos = g.log.filter((k) => fresh(k.tick)).map((k) => ({ tick: k.tick, text: sentence(k) }));
+  const cheats = g.claims.filter((c) => fresh(c.tick)).map((c) => ({ tick: c.tick, text: cheatLine(g, c) }));
+  const recent = tl && prefs.feed ? [...kos, ...cheats].sort((a, b) => a.tick - b.tick).slice(-4).reverse() : [];
+  const lines = recent.map((e) => e.text);
   if (lines.join("|") === lastFeed) return;
   lastFeed = lines.join("|");
   $("feed").replaceChildren(...lines.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
@@ -565,7 +651,14 @@ function showFeed(g: Game) {
 const KO_CALLS: Partial<Record<Knockout["how"], string>> = {
   self: "OOPS!", team: "FRIENDLY FIRE!", wall: "CRUSHED!", potato: "KABOOM!", tractor: "FLATTENED!",
 };
+// A knockout's shout beats a cheat's.
+const CHEAT_SHOUTS = ["", "HOLY COW!", "BUMPER CROP!", "TOPSY-TURVY!", "POPCORN!", "RAIN DANCE!", "COLD SNAP!", "LIGHTS OUT!"];
 function callout(g: Game) {
+  const c = g.claims.at(-1);
+  return koCall(g) || (c && g.tick - c.tick < 2 * TICK_HZ ? CHEAT_SHOUTS[c.cheat] : "");
+}
+
+function koCall(g: Game) {
   const k = g.log.at(-1);
   if (!k || g.tick - k.tick >= 2 * TICK_HZ) return "";
   const scored = (e: Knockout) => (e.how === "orb" || e.how === "ghost") && e.by === k.by && k.tick - e.tick < 3 * TICK_HZ;
@@ -590,7 +683,7 @@ function showCallout(g: Game) {
   if (!call) return;
   void el.offsetWidth; // restart the pop animation
   el.classList.add("pop");
-  sfx.announce();
+  if (!CHEAT_SHOUTS.includes(call)) sfx.announce(); // a cheat has its own jingle
 }
 
 // ---------- name tags: page text over the canvas, so they stay crisp at any size ----------
@@ -600,7 +693,8 @@ function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
   const players = g?.players ?? [];
   while (box.children.length < players.length) box.append(document.createElement("span"));
   const crown = g ? crowned(g) : -1;
-  const dark = g?.map === NIGHT && !!g.players[me]?.alive; // Night Farm: tags would give the others away (ghosts see all: they aim)
+  // Night Farm, or LIGHTS OUT on your screen: tags would give the others away (ghosts see all: they aim)
+  const dark = !!g && (g.map === NIGHT || (g.dark > 0 && g.darkBy !== me)) && !!g.players[me]?.alive;
   [...box.children].forEach((el, i) => {
     const tag = el as HTMLElement;
     const p = players[i];
@@ -608,7 +702,8 @@ function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
     if (tag.hidden) return;
     const d = drift[i] ?? { x: 0, y: 0 };
     const potato = p.potato ? ` · ${Math.ceil(p.potato / TICK_HZ)}s` : "";
-    const [text, cls] = [nameOf(i) + potato, `p${seats()[i] + 1}${p.alive ? "" : " ghost"}`];
+    const typed = typing[i] ? `: ${typing[i]}▌` : ""; // what they're typing in the cheat box, for all to see
+    const [text, cls] = [nameOf(i) + potato + typed, `p${seats()[i] + 1}${p.alive ? "" : " ghost"}`];
     if (tag.textContent !== text) tag.textContent = text;
     if (tag.className !== cls) tag.className = cls;
     tag.style.left = `${((p.x + d.x) / PX / (COLS * 16)) * 100}%`;
@@ -643,7 +738,8 @@ function scoreCard(g: Game, i: number, inPlay: boolean) {
   pips.className = "pips";
   pips.setAttribute("aria-label", `${wins} of ${g.opts.winRounds} round wins`);
   for (let k = 0; k < g.opts.winRounds; k++) pips.append(Object.assign(document.createElement("i"), { className: k < wins ? "won" : "" }));
-  card.append(face, who, pips);
+  const typed = Object.assign(document.createElement("span"), { className: "typed", textContent: `${typing[i]}▌` });
+  card.append(face, who, typing[i] ? typed : pips); // what they're typing in the cheat box, readable even on Night Farm
   if (g.opts.mode === HARVEST) {
     const crops = Object.assign(document.createElement("span"), { className: "crops", textContent: String(g.players[i].crops) });
     crops.prepend(Object.assign(new Image(), { src: CROP_ICON, alt: "crops:" }));
@@ -703,20 +799,15 @@ function hud() {
             : hurry && g.roundTick < limit + 3 * TICK_HZ
               ? "Hurry! The walls are closing in"
               : "";
-  const score = g.players.map((p, i) => `${seats()[i]}:${nameOf(i)}:${p.wins}:${p.alive || g.phase === "ready"}:${p.crops}`).join(",");
+  const score = g.players.map((p, i) => `${seats()[i]}:${nameOf(i)}:${p.wins}:${p.alive || g.phase === "ready"}:${p.crops}:${typing[i] ?? ""}`).join(",");
 
   const shownAwards = tl && g.phase === "over" ? lastAwards : [];
   const cheats = !!tl && !inLobby && me >= 0 && !!g.opts.cheats;
-  const canCheat = !!you?.alive && g.phase === "play";
-  const key = [
-    score, g.opts.winRounds, timer, title, tint, sub, toast, inLobby, connected, me, JSON.stringify(shownAwards), cheats, canCheat, you?.god,
-  ].join("|");
+  const key = [score, g.opts.winRounds, timer, title, tint, sub, toast, inLobby, connected, me, JSON.stringify(shownAwards), cheats].join("|");
   if (key === lastHud) return;
   lastHud = key;
   showAwards($("awards"), shownAwards);
-  cheatBar.hidden = !cheats;
-  cheatBar.disabled = !canCheat; // knocked out, or between rounds
-  godButton.setAttribute("aria-pressed", String(!!you?.god));
+  cheatBox.hidden = !cheats;
   $("board").hidden = inLobby || !tl;
   $("timer").textContent = timer;
   $("timer").classList.toggle("hurry", hurry);
@@ -761,18 +852,21 @@ function frame(now: number) {
     if (!steps) tl.advance(tl.g.tick); // still apply any corrections that came in
     shown = tl.g;
     listen(shown);
+    if (shown.phase !== "play" && typing.some(Boolean)) typing = []; // the round's over: half-typed codes go too
     for (const d of tl.drift) {
       d.x *= 0.8; // ease rollback corrections out over a few frames
       d.y *= 0.8;
     }
   }
   music(volume.music > 0); // lobby too, once the browser has allowed audio
+  if (!canType() && (cheatInput.value || document.activeElement === cheatInput)) closeBox();
   render(ctx, shown, seats(), tl?.drift, me, crowned(shown));
   nameTags(tl && !(lobby && !lobby.playing) ? shown : null, tl?.drift);
   hud();
   showLog(shown);
   showFeed(shown);
   showCallout(shown);
+  showCodes(shown);
   requestAnimationFrame(frame);
 }
 

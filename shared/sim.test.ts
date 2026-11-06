@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
-  ACT, BELT, BLOCK, BOMB, BUTTERFINGERS, CHEAT_SHIFT, COLS, CROP, CRUMBLE, CURE, DOWN, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
-  GOD, HARVEST, ICE, KICK, LANES, LEFT, MAX_BOMBS, MAX_OUT, MAX_RANGE, NAPALM_FLAME, ORB_UP, OVER_TICKS, POTATO, READY_TICKS, RESPAWN_TICKS, RESULT_TICKS, REVERSED, RIGHT, ROBBED, ROUND_TICKS, SKULL,
-  SHRINK_EVERY, SPAWNS, SPEEDS, SPIRAL, SWAP, TICK_HZ, TRACTOR, WALL, center, createGame, roundTicks, tickGame, tileAt, tractor, type Bomb,
+  ACT, BELT, BLOCK, BOMB, BUMPERCROP, BUTTERFINGERS, CHEAT_SHIFT, COLDSNAP, COLS, CROP, CRUMBLE, DARK_TICKS, DOWN, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
+  HARVEST, HOLY_TICKS, HOLYCOW, ICE, LANES, LEFT, LIGHTSOUT, MAX_BOMBS, MAX_RANGE, NAPALM_FLAME, POPCORN, RAINDANCE, OVER_TICKS, POTATO, READY_TICKS, RESPAWN_TICKS, RESULT_TICKS, REVERSED, RIGHT, ROBBED, ROUND_TICKS, SKULL,
+  SHRINK_EVERY, SNAP_TICKS, SPAWNS, SPEEDS, SPIRAL, SWAP, TOPSYTURVY, cheatBlock, TICK_HZ, TRACTOR, WALL, center, createGame, roundTicks, tickGame, tileAt, tractor, type Bomb,
   type Game,
   type Options,
 } from "./sim.ts";
@@ -642,48 +642,94 @@ test("Tractor Lane: the road stays clear, a warning comes first, then the tracto
   assert.equal(g.fire[idx(9, row)], 0, "without a bang");
 });
 
-test("cheats: ignored unless the room allows them; then a tap gives a power-up, maxes you out, lifts a curse or toggles god mode", () => {
-  const tap = (cheat: number) => cheat << CHEAT_SHIFT;
+const tap = (cheat: number) => cheat << CHEAT_SHIFT; // a typed cheat code, as it travels in the input
+
+test("cheats: ignored unless the room allows them; each code once a round, one code each a round, all fresh next round", () => {
   const off = arena();
-  tickGame(off, [tap(KICK)]);
-  assert.equal(off.players[0].kick, false, "cheats off: the bits do nothing");
+  tickGame(off, [tap(BUMPERCROP)]);
+  assert.equal(off.players[0].bombs, 1, "cheats off: the bits do nothing");
+  assert.equal(off.claims.length, 0);
 
-  const g = arena(2, { cheats: true });
-  const p = g.players[0];
-  tickGame(g, [tap(ORB_UP)]);
-  tickGame(g, [tap(ORB_UP)]); // still held: one tap, one cheat
-  assert.equal(p.bombs, 2);
+  const g = arena(3, { cheats: true });
+  const [p0, p1] = g.players;
+  tickGame(g, [tap(BUMPERCROP)]);
+  tickGame(g, [tap(BUMPERCROP)]); // still held: one tap, one cheat
+  assert.deepEqual([p0.bombs, p0.range, p0.speed], [MAX_BOMBS, MAX_RANGE, SPEEDS.length - 1]);
+  assert.deepEqual(g.claims.map((c) => [c.by, c.cheat]), [[0, BUMPERCROP]]);
+  assert.equal(cheatBlock(g, 1, BUMPERCROP), "taken");
+  tickGame(g, [0, tap(BUMPERCROP)]);
+  assert.equal(p1.bombs, 1, "someone got there first");
+  assert.equal(cheatBlock(g, 0, COLDSNAP), "spent");
+  tickGame(g, [tap(COLDSNAP)]);
+  assert.equal(g.claims.length, 1, "one cheat a round each");
+  tickGame(g, [0, 0, tap(COLDSNAP)]);
+  assert.deepEqual(g.claims.map((c) => [c.by, c.cheat]), [[0, BUMPERCROP], [2, COLDSNAP]]);
+  assert.equal(p0.stats.cheats, 1);
+
+  [g.phase, g.phaseLeft] = ["result", 1];
   tickGame(g, []);
-  tickGame(g, [tap(ORB_UP) | RIGHT]); // tapped again, while walking
-  assert.equal(p.bombs, 3);
-  assert.ok(p.x > center(1), "the move still happens");
-
-  tickGame(g, [tap(MAX_OUT)]);
-  assert.deepEqual([p.bombs, p.range, p.speed], [MAX_BOMBS, MAX_RANGE, SPEEDS.length - 1]);
-  Object.assign(p, { curse: REVERSED, curseLeft: 300 });
-  tickGame(g, [tap(CURE)]);
-  assert.equal(p.curse, 0);
-  assert.equal(p.stats.cheats, 4);
-  assert.equal(p.stats.pickups, 0, "cheats aren't pickups");
+  run(g, READY_TICKS);
+  assert.equal(g.phase, "play");
+  assert.equal(g.claims.length, 0, "a new round, so every code is free again");
+  tickGame(g, [0, tap(BUMPERCROP)]);
+  assert.equal(g.players[1].bombs, MAX_BOMBS);
 });
 
-test("god mode: blasts can't touch you, but sudden death walls still can", () => {
+test("HOLY COW: 10 s untouchable by blasts and your curse lifts, but walls still crush you; a ghost can't use it", () => {
   const g = arena(3, { cheats: true });
-  tickGame(g, [GOD << CHEAT_SHIFT]);
-  const p = g.players[0];
-  assert.equal(p.god, true);
+  const p = Object.assign(g.players[0], { curse: REVERSED, curseLeft: 300 });
   place(g, 0, 2, 1);
+  tickGame(g, [tap(HOLYCOW)]);
+  assert.equal(p.curse, 0);
   g.bombs.push(orb(1, 1, 1, { fuse: 1, range: 2 }));
   tickGame(g, []);
   assert.ok(g.fire[idx(2, 1)] > 0);
   assert.equal(p.alive, true, "standing in the fire");
-  g.grid[idx(2, 1)] = WALL;
-  tickGame(g, []);
-  assert.equal(p.alive, false, "a falling wall still crushes you");
+  run(g, HOLY_TICKS);
+  assert.equal(p.god, 0, "it wears off");
 
   const h = arena(2, { cheats: true });
-  tickGame(h, [GOD << CHEAT_SHIFT]);
+  tickGame(h, [tap(HOLYCOW)]);
+  h.grid[tileAt(h.players[0].x, h.players[0].y)] = WALL;
   tickGame(h, []);
-  tickGame(h, [GOD << CHEAT_SHIFT]);
-  assert.equal(h.players[0].god, false, "a second tap turns it off");
+  assert.equal(h.players[0].alive, false, "a falling wall still crushes you");
+
+  const k = arena(3, { cheats: true });
+  Object.assign(k.players[0], { alive: false, ghost: true, diedAt: 0 });
+  tickGame(k, [tap(HOLYCOW)]);
+  assert.equal(k.claims.length, 0, "not while you're a ghost");
+  assert.equal(cheatBlock(k, 0, HOLYCOW), "out");
+  k.bombs.push(orb(1, 5, 5), orb(2, 7, 7, { remote: true }));
+  tickGame(k, []);
+  tickGame(k, [tap(POPCORN)]);
+  assert.equal(k.claims.length, 1, "the claim wasn't spent, and POPCORN works from the rim");
+  assert.equal(k.bombs.length, 0, "every orb on the ground went off, remote ones too");
+  assert.ok(k.fire[idx(5, 5)] > 0 && k.fire[idx(7, 7)] > 0);
+});
+
+test("TOPSY-TURVY flips opponents only; RAIN DANCE sprouts power-ups; COLD SNAP ices the grass; LIGHTS OUT darkens the others", () => {
+  const g = arena(4, { cheats: true, teams: [0, 1, 0, 1] });
+  tickGame(g, [tap(TOPSYTURVY)]);
+  assert.deepEqual(g.players.map((p) => p.curse), [0, REVERSED, 0, REVERSED], "only the other team flips");
+
+  tickGame(g, [0, tap(RAINDANCE)]);
+  assert.equal(g.items.filter(Boolean).length, 6);
+
+  tickGame(g, [0, 0, tap(COLDSNAP)]);
+  assert.equal(g.floor[idx(5, 5)], ICE);
+  tickGame(g, [0, 0, 0, tap(LIGHTSOUT)]);
+  assert.deepEqual([g.dark, g.darkBy], [DARK_TICKS, 3]);
+  run(g, Math.max(SNAP_TICKS, DARK_TICKS));
+  assert.equal(g.floor[idx(5, 5)], GRASS, "thawed");
+  assert.equal(g.dark, 0, "lights back on");
+});
+
+test("two players typing the same code on the same tick: one gets it, and the same one on every replay", () => {
+  const race = () => {
+    const g = arena(2, { cheats: true });
+    tickGame(g, [tap(BUMPERCROP), tap(BUMPERCROP)]);
+    return g.claims;
+  };
+  assert.equal(race().length, 1);
+  assert.deepEqual(race(), race());
 });
