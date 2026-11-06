@@ -13,8 +13,8 @@ export const FUSE = 150; // 2.5 s
 export const FLAME = 30;
 export const NAPALM_FLAME = 2 * TICK_HZ;
 export const READY_TICKS = 2 * TICK_HZ;
-export const ROUND_TICKS = 120 * TICK_HZ; // 2:00, then the arena starts shrinking
-export const SHRINK_EVERY = 30; // ticks between falling walls: a tick-tock, twice a second
+export const ROUND_TICKS = 90 * TICK_HZ; // 1:30, then the arena starts shrinking
+export const SHRINK_EVERY = 20; // ticks between falling walls: three a second, so sudden death is over in well under a minute
 export const RESULT_TICKS = 3 * TICK_HZ;
 export const OVER_TICKS = 6 * TICK_HZ;
 export const WIN_ROUNDS = 2; // default: best of 3
@@ -24,7 +24,7 @@ const BELT_SPEED = 8;
 export const KICK_SPEED = 32;
 export const INVULN = 90; // after a shield breaks
 export const GHOST_DELAY = TICK_HZ; // after a knockout, before you're back on the rim
-export const GHOST_RELOAD = 5 * TICK_HZ; // a ghost's wait between throws, and from the knockout to the first one
+export const GHOST_RELOAD = 8 * TICK_HZ; // a ghost's wait between throws, and from the knockout to the first one
 export const CURSE_TICKS = 10 * TICK_HZ;
 const IMMUNE_TICKS = TICK_HZ; // after passing a curse on, so it can't bounce straight back
 export const MAX_BOMBS = 8;
@@ -83,7 +83,8 @@ export const SWAP = 11;
 export const FROST = 12;
 export const GUST = 13;
 export const CROP = 14; // Harvest mode only: not a power-up, so it has no weight and no checkbox
-const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 10, 6, 4, 6, 5]; // by item id
+// By item id. The luck-driven ones (Skull, Swap, Gust) are kept rare, so the better player usually wins.
+const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 4, 6, 2, 6, 3];
 export const FROST_TICKS = 5 * TICK_HZ; // how long Frost ice lasts
 const CROP_CHANCE = 0.5; // Harvest: a broken bush drops a crop this often, else the usual power-up roll
 export const RESPAWN_TICKS = 2 * TICK_HZ; // Harvest: from a knockout back to your corner
@@ -152,6 +153,7 @@ export interface Player {
   alive: boolean;
   diedAt: number;
   ghost: boolean; // knocked out and riding the rim
+  returned: boolean; // came back from the rim this round: the next knockout is for good
   bombs: number;
   range: number;
   speed: number;
@@ -279,6 +281,7 @@ function freshPlayer(id: number): Player {
     alive: true,
     diedAt: -1,
     ghost: false,
+    returned: false,
     bombs: 1,
     range: 2,
     speed: 0,
@@ -419,7 +422,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     if (p.alive) control(g, id, p, input);
     else if (p.ghost) haunt(g, id, p, input);
     else if (g.opts.mode === HARVEST && g.tick - p.diedAt >= RESPAWN_TICKS) respawn(g, id);
-    else if (g.opts.revenge && g.tick - p.diedAt >= GHOST_DELAY) toRim(p);
+    else if (g.opts.revenge && !p.returned && g.tick - p.diedAt >= GHOST_DELAY) toRim(p); // one comeback a round
     p.prev = input;
   }
   passCurses(g);
@@ -494,7 +497,8 @@ function knockedOut(g: Game, id: number, i: number) {
   killer.stats.kos++;
   if (!g.fireRevenge[i] || !killer.ghost) return;
   const { wins, stats, prev } = killer;
-  Object.assign(killer, freshPlayer(by), { x: center(i % COLS), y: center(Math.floor(i / COLS)), invuln: INVULN, wins, stats, prev });
+  const spot = { x: center(i % COLS), y: center(Math.floor(i / COLS)) };
+  Object.assign(killer, freshPlayer(by), spot, { invuln: INVULN, returned: true, wins, stats, prev });
   stats.comebacks++;
   entry.back = true;
 }

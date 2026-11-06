@@ -10,8 +10,9 @@ A 4-player online bomb-maze brawl set in the Critter Catch world, made for playi
   - Harvest: broken bushes drop carrots. A knockout spills half of yours and you're back at your corner 2 s later; most carrots at 0:00 wins.
   - Hot Potato: someone gets the potato at Go. Touch someone to pass it on before its 15 s run out.
 - **Teams:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
-- **Revenge:** once knocked out, you ride the outer wall as a ghost, orb in hand, and lob it in (one throw every 5 seconds). If your orb knocks out an opponent, you're back in their place. Nobody sits out.
-- **Power-ups:**
+- **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one throw every 8 seconds; an orb over a ghost's head means it's ready). If your orb knocks out an opponent, you're back in their place, once per round: get knocked out again and you're out until the next round.
+- **Rounds:** 1:30 by default, then sudden death: the walls close in, three a second.
+- **Power-ups** (Skull, Swap and Gust are rare drops, so luck decides less):
   - Orb+, Fire+, Speed+, Kick, Shield, Remote
   - Pierce: blasts go through bushes
   - Napalm: your fire burns for 2 s

@@ -1,10 +1,10 @@
 import { Timeline } from "../shared/netcode.ts";
 import {
-  ACT, BOMB, COLS, CROP, CURSES, DOWN, HARVEST, LANES, LEFT, MAPS, MODES, NIGHT, RIGHT, ROBBED, ROUND_CHOICES, ROWS, TICK_HZ, TILE, UP,
-  createGame, roundTicks, sideOf, tileAt, tractor, type Game, type Knockout, type Stats,
+  ACT, BOMB, COLS, CROP, CURSES, DOWN, GHOST_RELOAD, HARVEST, LANES, LEFT, MAPS, MODES, NIGHT, RIGHT, ROBBED, ROUND_CHOICES, ROWS, TICK_HZ,
+  TILE, UP, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor, type Game, type Knockout, type Stats,
 } from "../shared/sim.ts";
 import { music, setVolume, sfx, unlock, volume } from "./audio.ts";
-import { render } from "./render.ts";
+import { CROWN_TOP, render } from "./render.ts";
 import { ITEM_TILES, TRAINERS } from "./sprites.ts";
 
 const TICK_MS = 1000 / TICK_HZ;
@@ -26,7 +26,17 @@ const ITEM_HELP = [
   "Frost: your blasts leave ice for 5 seconds",
   "Gust: blows every orb on the ground the way you face",
 ];
-const MODE_HINTS = ["Ready…", "Harvest: most crops at 0:00 wins. Knocked out? You drop half.", "Hot Potato: don't be holding it when it goes off!"];
+// Per game, by MODES index: the win condition first. Short for the Ready screen, full for the lobby and the Games panel.
+const MODE_HINTS = [
+  "Last one standing wins",
+  "Most carrots at 0:00 wins. Knocked out? You drop half.",
+  "Last one standing wins. Pass the potato before it goes off!",
+];
+const MODE_HELP = [
+  "Win: be the last trainer (or team) standing. At 0:00 the walls close in; with Sudden death off, time running out is a draw.",
+  "Win: hold the most carrots when the clock hits 0:00 (teams add theirs up; a tie is a draw). Break bushes to find carrots and walk over them to pick them up. Get knocked out and half your carrots spill nearby for anyone to grab; you're back at your corner 2 seconds later. No ghosts, and the walls don't close in.",
+  "Win: be the last trainer (or team) standing. At Go one player gets the potato, with a timer on their name tag. Walk into someone to pass it on; the timer keeps running. Whoever holds it at 0 is knocked out, and a fresh potato goes to someone else. Orbs work as usual.",
+];
 const TEAM_NAMES = ["Teal & Green", "Red & Purple"]; // team = seat % 2
 // End-of-match awards: [stat, title, how to say the number]. Only shown when someone scored at least 1.
 const AWARDS: [keyof Stats, string, (n: number) => string][] = [
@@ -35,7 +45,7 @@ const AWARDS: [keyof Stats, string, (n: number) => string][] = [
   ["curses", "Hot potato", (n) => `passed on ${n} curse${n === 1 ? "" : "s"}`],
   ["bushes", "Bush whacker", (n) => `${n} bush${n === 1 ? "" : "es"}`],
   ["pickups", "Collector", (n) => `${n} power-up${n === 1 ? "" : "s"}`],
-  ["crops", "Top farmer", (n) => `${n} crop${n === 1 ? "" : "s"}`],
+  ["crops", "Top farmer", (n) => `${n} carrot${n === 1 ? "" : "s"}`],
   ["orbs", "Trigger happy", (n) => `${n} orb${n === 1 ? "" : "s"}`],
   ["oops", "Oops!", (n) => `own orb ×${n}`],
 ];
@@ -91,6 +101,7 @@ interface LobbySeat {
   name: string;
   ready: boolean;
   you: boolean;
+  leader: boolean; // been in the room longest
 }
 interface Lobby {
   code: string;
@@ -121,6 +132,11 @@ let lastSync = 0;
 const send = (msg: unknown) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
 const nameOf = (i: number) => (i === me ? "You" : roster[i]?.name || `P${i + 1}`);
 const seats = () => roster.map((r) => r.seat);
+// Which sim player wears the room leader's crown: the lobby says which seat, the roster maps seats to players.
+function leader() {
+  const seat = lobby?.seats.findIndex((s) => s?.leader) ?? -1;
+  return seat < 0 ? -1 : roster.findIndex((r) => !r.bot && r.seat === seat);
+}
 
 function connect() {
   const s = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?room=${room}`);
@@ -371,6 +387,12 @@ function showLobby() {
       const label = document.createElement("span");
       const who = s ? `${s.name}${s.you ? " (you)" : ""}: ${s.ready ? "ready" : "not ready"}` : l.bots ? "Bot" : "Empty";
       label.textContent = l.settings.teams ? `${who} · ${TEAM_NAMES[seat % 2]}` : who;
+      if (s?.leader) {
+        const crown = Object.assign(document.createElement("span"), { className: "crown", textContent: "👑", title: "Room leader" });
+        crown.setAttribute("role", "img");
+        crown.setAttribute("aria-label", "Room leader");
+        label.prepend(crown, " ");
+      }
       li.append(face, label);
       if (!s) {
         const sit = document.createElement("button");
@@ -393,6 +415,7 @@ function showLobby() {
   revengePick.checked = l.settings.revenge;
   shrinkPick.checked = l.settings.shrink;
   gamePick.value = String(l.settings.mode);
+  $("gameHelp").textContent = MODE_HELP[l.settings.mode] ?? "";
   revengePick.disabled = shrinkPick.disabled = l.settings.mode === HARVEST; // Harvest respawns you and runs to 0:00
   for (const { id, box } of itemPicks) box.checked = !!(l.settings.items & (1 << id));
   const mine = l.seats.find((s) => s?.you);
@@ -410,6 +433,12 @@ function showLobby() {
           : "Starts when everyone is ready.";
 }
 
+$("games").append(
+  ...MODES.flatMap((name, i) => [
+    Object.assign(document.createElement("dt"), { textContent: name }),
+    Object.assign(document.createElement("dd"), { textContent: MODE_HELP[i] }),
+  ])
+);
 $("legend").append(
   ...ITEM_HELP.slice(1).map((text, k) => {
     const li = document.createElement("li");
@@ -512,6 +541,7 @@ function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
   const box = $("tags");
   const players = g?.players ?? [];
   while (box.children.length < players.length) box.append(document.createElement("span"));
+  const crowned = leader();
   [...box.children].forEach((el, i) => {
     const tag = el as HTMLElement;
     const p = players[i];
@@ -523,7 +553,8 @@ function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
     if (tag.textContent !== text) tag.textContent = text;
     if (tag.className !== cls) tag.className = cls;
     tag.style.left = `${((p.x + d.x) / PX / (COLS * 16)) * 100}%`;
-    tag.style.top = `${(((p.y + d.y) / PX - (p.carry ? 28 : 16)) / (ROWS * 16)) * 100}%`; // above a carried orb
+    const lift = p.carry ? 28 : i === crowned ? CROWN_TOP + 2 : 16; // above a carried orb, or the crown
+    tag.style.top = `${(((p.y + d.y) / PX - lift) / (ROWS * 16)) * 100}%`;
   });
 }
 
@@ -591,7 +622,11 @@ function hud() {
             ? "Robbed! You lost every power-up"
             : `Cursed: ${CURSES[you.curse]} (${Math.ceil(you.curseLeft / TICK_HZ)}s). Touch someone to pass it on!`
           : you?.ghost
-            ? "Ghost: run along the wall, Space lobs an orb in"
+            ? ghostReady(g, you)
+              ? "Ghost: run along the wall, Space lobs an orb in"
+              : `Ghost: run along the wall. Next orb in ${Math.ceil((GHOST_RELOAD - (g.tick - Math.max(you.threwAt, you.diedAt))) / TICK_HZ)}s`
+            : you && !you.alive && you.returned
+            ? "Out until next round: you already came back once"
             : hurry && g.roundTick < limit + 3 * TICK_HZ
               ? "Hurry! The walls are closing in"
               : "";
@@ -651,7 +686,7 @@ function frame(now: number) {
     }
   }
   music(volume.music > 0); // lobby too, once the browser has allowed audio
-  render(ctx, shown, seats(), tl?.drift, me);
+  render(ctx, shown, seats(), tl?.drift, me, leader());
   nameTags(tl && !(lobby && !lobby.playing) ? shown : null, tl?.drift);
   hud();
   showLog(shown);

@@ -58,7 +58,7 @@ interface Settings {
   items: number; // power-ups that can drop, as a bitmask by item id
   mode: number; // index into MODES: Classic, Harvest, Hot Potato
 }
-const DEFAULT_SETTINGS: Settings = { map: -1, teams: false, winRounds: 2, roundSecs: 120, shrink: true, revenge: true, items: ALL_ITEMS, mode: 0 };
+const DEFAULT_SETTINGS: Settings = { map: -1, teams: false, winRounds: 2, roundSecs: 90, shrink: true, revenge: true, items: ALL_ITEMS, mode: 0 };
 interface Room {
   code: string;
   clients: Client[];
@@ -81,13 +81,14 @@ const freeSeat = (room: Room) => [0, 1, 2, 3].find((s) => !room.clients.some((c)
 const rosterIndex = (room: Room, c: Client) => room.roster.findIndex((r) => r.client === c);
 
 function sendLobby(room: Room) {
+  const leader = room.clients.find((x) => x.ws); // clients are in join order: whoever has been here longest wears the crown
   for (const c of room.clients) {
     send(c, {
       type: "lobby",
       code: room.code,
       seats: [0, 1, 2, 3].map((s) => {
         const o = room.clients.find((x) => x.seat === s);
-        return o ? { name: o.name, ready: o.ready, you: o === c } : null;
+        return o ? { name: o.name, ready: o.ready, you: o === c, leader: o === leader } : null;
       }),
       bots: room.bots,
       settings: room.settings,

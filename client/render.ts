@@ -1,14 +1,15 @@
 // Draws one game state. seats[i] is sim player i's seat, which picks their colours.
 import {
-  BELT, BLOCK, COLS, CRUMBLE, DX, DY, FLAME, FLOOR, FUSE, ICE, LANES, NIGHT, PORTAL, ROWS, THROW_HOPS, TICK_HZ, TILE, TRACTOR, WALL, tractor,
-  type Bomb, type Game,
+  BELT, BLOCK, COLS, CRUMBLE, DX, DY, FLAME, FLOOR, FUSE, ICE, LANES, NIGHT, PORTAL, ROWS, THROW_HOPS, TICK_HZ, TILE, TRACTOR, WALL, ghostReady,
+  tractor, type Bomb, type Game,
 } from "../shared/sim.ts";
 import {
-  BELTS, BLOCKS, CURSE_MARK, FENCES, FLOWERS, GRASS, ICE_IMG, ITEM_TILES, ORBS, PILLAR, PORTAL_IMG, POTATO_IMG, TRACTOR_IMG, TRAINERS,
+  BELTS, BLOCKS, CROWN_IMG, CURSE_MARK, FENCES, FLOWERS, GRASS, ICE_IMG, ITEM_TILES, ORBS, PILLAR, PORTAL_IMG, POTATO_IMG, TRACTOR_IMG, TRAINERS,
 } from "./sprites.ts";
 
 const PX = TILE / 16; // sim units per screen pixel
 const OVERHEAD = 18; // px above a player's centre where a carried orb sits, on the hat
+export const CROWN_TOP = 20; // px above a player's centre where the room leader's crown starts (name tags go above it)
 
 const field = document.createElement("canvas");
 field.width = COLS * 16;
@@ -64,7 +65,7 @@ function drawBelt(ctx: CanvasRenderingContext2D, x: number, y: number, d: number
   ctx.restore();
 }
 
-function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: number, nudge = { x: 0, y: 0 }) {
+function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: number, nudge = { x: 0, y: 0 }, crown = false) {
   const p = g.players[id];
   const t = g.tick;
   if (!p.alive && !p.ghost && (t - p.diedAt > 50 || (t >> 2) % 2)) return; // knocked out: blink, then gone until back as a ghost
@@ -75,8 +76,9 @@ function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: n
   const frame = p.moving && g.phase === "play" ? 1 + (Math.floor(t / 9) % 2) : 0;
   ctx.globalAlpha = p.alive ? 1 : p.ghost ? 0.75 : 0.6;
   ctx.drawImage(TRAINERS[seat][p.dir][frame], x - 10, y - 16); // 20x20 farmer, feet 3 px below centre; the hat shows the colour
+  if (crown) ctx.drawImage(CROWN_IMG, x - 5, y - CROWN_TOP); // the hat's top is 14 px up in every frame, so it sits flush
   ctx.globalAlpha = 1;
-  if (p.ghost && !lean) drawOrb(ctx, { x: x * PX, y: (y - OVERHEAD) * PX, remote: false, fuse: FUSE }, t); // ghosts always hold one, except mid-throw
+  if (p.ghost && ghostReady(g, p)) drawOrb(ctx, { x: x * PX, y: (y - OVERHEAD) * PX, remote: false, fuse: FUSE }, t); // an orb overhead = ready to throw
   if (p.curse && (t >> 3) % 2) ctx.drawImage(CURSE_MARK, x - 5, y - 27);
   if (p.potato) ctx.drawImage(POTATO_IMG, x - 8, y - 34 - ((t >> (p.potato < 3 * TICK_HZ ? 1 : 3)) % 2)); // jiggles faster near the end
   if (p.shield) {
@@ -141,7 +143,8 @@ function tractors(ctx: CanvasRenderingContext2D, g: Game) {
 }
 
 // nudge[i]: extra offset for player i, easing out a rollback correction. me: whose lantern lights Night Farm.
-export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], nudge: { x: number; y: number }[] = [], me = -1) {
+// leader: the player wearing the room leader's crown, if any.
+export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], nudge: { x: number; y: number }[] = [], me = -1, leader = -1) {
   const t = g.tick;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(field, 0, 0);
@@ -187,7 +190,7 @@ export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], 
       }
     }
     for (const b of g.bombs) if (!b.hops && Math.floor(b.y / TILE) === r) drawOrb(ctx, b, t);
-    for (const id of byY) if (Math.floor(g.players[id].y / TILE) === r) drawTrainer(ctx, g, id, seats[id] ?? id, nudge[id]);
+    for (const id of byY) if (Math.floor(g.players[id].y / TILE) === r) drawTrainer(ctx, g, id, seats[id] ?? id, nudge[id], id === leader);
   }
   // Carried orbs sit on the hat; thrown ones leave from there in an arc over everything (shadow on the ground),
   // landing a tile short, then a last hop. Bounces off taken tiles are that same small hop.

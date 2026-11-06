@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
   ACT, BELT, BLOCK, BOMB, BUTTERFINGERS, COLS, CROP, CRUMBLE, DOWN, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
-  HARVEST, ICE, LANES, LEFT, NAPALM_FLAME, OVER_TICKS, POTATO, READY_TICKS, RESPAWN_TICKS, REVERSED, RIGHT, ROBBED, ROUND_TICKS, SKULL,
+  HARVEST, ICE, LANES, LEFT, NAPALM_FLAME, OVER_TICKS, POTATO, READY_TICKS, RESPAWN_TICKS, RESULT_TICKS, REVERSED, RIGHT, ROBBED, ROUND_TICKS, SKULL,
   SHRINK_EVERY, SPAWNS, SPIRAL, SWAP, TICK_HZ, TRACTOR, WALL, center, createGame, roundTicks, tickGame, tileAt, tractor, type Bomb,
   type Game,
   type Options,
@@ -291,6 +291,30 @@ test("revenge comeback: a ghost whose orb knocks someone out takes their place",
     run(g, FLAME);
     assert.ok(ghost.alive, "brief invulnerability: their own fire doesn't get them");
   }
+});
+
+test("revenge: one comeback a round; the next knockout is for good, until the next round", () => {
+  const g = arena(4);
+  const ghost = Object.assign(g.players[0], { alive: false, ghost: true, diedAt: 0, x: center(0), y: center(5) });
+  g.tick = GHOST_RELOAD;
+  place(g, 1, 3, 5);
+  place(g, 2, 9, 9);
+  tickGame(g, [BOMB]);
+  run(g, FUSE);
+  assert.ok(ghost.alive && ghost.returned, "came back");
+
+  run(g, FLAME + 100); // invulnerability over
+  place(g, 0, 7, 3);
+  g.bombs.push(orb(2, 7, 3, { fuse: 1 }));
+  run(g, 1 + GHOST_DELAY + 10);
+  assert.equal(ghost.alive, false);
+  assert.equal(ghost.ghost, false, "out for the rest of the round");
+  assert.equal(g.phase, "play", "the other two play on");
+
+  g.players[3].alive = false; // one left standing: round over
+  run(g, 1 + RESULT_TICKS + 1);
+  assert.equal(g.round, 2);
+  assert.equal(ghost.returned, false, "a fresh comeback next round");
 });
 
 test("Glove throws an orb over walls; it bounces off taken tiles and wraps around the edge", () => {

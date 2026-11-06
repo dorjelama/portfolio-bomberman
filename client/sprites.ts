@@ -145,6 +145,16 @@ const PORTAL_TILE = [
   "................",
 ];
 
+// The room leader's crown, worn on the hat. Even width, like the hat, so it sits centred.
+const CROWN = [
+  ".k..kk..k.",
+  "kYkkYYkkYk",
+  "kYYkYYkYYk",
+  "kYYYccYYYk",
+  "kyyyyyyyyk",
+  ".kkkkkkkk.",
+];
+
 // Draws a grid to its own canvas once, so the game loop only blits images.
 function toCanvas(rows: string[], overrides: Record<string, string> = {}) {
   if (rows.some((r) => r.length !== rows[0].length)) throw new Error(`ragged sprite: ${rows.join("|")}`);
@@ -243,3 +253,4 @@ export const ICE_IMG = toCanvas(ICE_TILE, { I: "#bfe6f5", i: "#ffffff", J: "#9fd
 export const BELTS = [beltUp, beltDown, beltLeft, beltRight].map((rows) => toCanvas(rows)); // by sim direction
 export const PORTAL_IMG = toCanvas(PORTAL_TILE);
 export const CURSE_MARK = toCanvas(ICONS[9]);
+export const CROWN_IMG = toCanvas(CROWN);
