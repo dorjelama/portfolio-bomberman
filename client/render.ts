@@ -1,8 +1,9 @@
 // Draws one game state. seats[i] is sim player i's seat, which picks their colours.
-import { BELT, BLOCK, COLS, CRUMBLE, FLAME, FLOOR, ICE, PORTAL, ROWS, TILE, WALL, type Bomb, type Game } from "../shared/sim.ts";
+import { BELT, BLOCK, COLS, CRUMBLE, DX, DY, FLAME, FLOOR, FUSE, ICE, PORTAL, ROWS, THROW_HOPS, TILE, WALL, type Bomb, type Game } from "../shared/sim.ts";
 import { BELTS, BLOCKS, CURSE_MARK, FENCES, FLOWERS, GRASS, ICE_IMG, ITEM_TILES, ORBS, PILLAR, PORTAL_IMG, TRAINERS } from "./sprites.ts";
 
 const PX = TILE / 16; // sim units per screen pixel
+const OVERHEAD = 18; // px above a player's centre where a carried orb sits, on the hat
 
 const field = document.createElement("canvas");
 field.width = COLS * 16;
@@ -34,7 +35,7 @@ function drawFire(ctx: CanvasRenderingContext2D, g: Game, i: number) {
   }
 }
 
-function drawOrb(ctx: CanvasRenderingContext2D, b: Bomb, t: number) {
+function drawOrb(ctx: CanvasRenderingContext2D, b: Pick<Bomb, "x" | "y" | "remote" | "fuse">, t: number) {
   const x = Math.round(b.x / PX);
   const y = Math.round(b.y / PX);
   const swell = Math.floor(t / (!b.remote && b.fuse < 45 ? 4 : 12)) % 2; // pulses faster just before it blows
@@ -63,12 +64,14 @@ function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: n
   const t = g.tick;
   if (!p.alive && !p.ghost && (t - p.diedAt > 50 || (t >> 2) % 2)) return; // knocked out: blink, then gone until back as a ghost
   if (p.alive && p.invuln && (t >> 2) % 2) return;
-  const x = Math.round((p.x + nudge.x) / PX);
-  const y = Math.round((p.y + nudge.y) / PX);
+  const lean = t - p.threwAt < 8 ? 2 : 0; // just threw: lunge into it
+  const x = Math.round((p.x + nudge.x) / PX) + DX[p.dir] * lean;
+  const y = Math.round((p.y + nudge.y) / PX) + DY[p.dir] * lean;
   const frame = p.moving && g.phase === "play" ? 1 + (Math.floor(t / 9) % 2) : 0;
   ctx.globalAlpha = p.alive ? 1 : p.ghost ? 0.75 : 0.6;
   ctx.drawImage(TRAINERS[seat][p.dir][frame], x - 10, y - 16); // 20x20 farmer, feet 3 px below centre; the hat shows the colour
   ctx.globalAlpha = 1;
+  if (p.ghost && !lean) drawOrb(ctx, { x: x * PX, y: (y - OVERHEAD) * PX, remote: false, fuse: FUSE }, t); // ghosts always hold one, except mid-throw
   if (p.curse && (t >> 3) % 2) ctx.drawImage(CURSE_MARK, x - 5, y - 27);
   if (p.shield) {
     ctx.strokeStyle = "rgb(63 208 203 / 0.8)";
@@ -123,13 +126,17 @@ export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], 
     for (const b of g.bombs) if (!b.hops && Math.floor(b.y / TILE) === r) drawOrb(ctx, b, t);
     for (const id of byY) if (Math.floor(g.players[id].y / TILE) === r) drawTrainer(ctx, g, id, seats[id] ?? id, nudge[id]);
   }
-  // Thrown orbs fly over everything: a hop arc per tile, with a shadow on the ground.
+  // Carried orbs sit on the hat; thrown ones leave from there in an arc over everything (shadow on the ground),
+  // landing a tile short, then a last hop. Bounces off taken tiles are that same small hop.
   for (const b of g.bombs) {
     if (!b.hops) continue;
-    const along = ((((b.x - TILE / 2) * b.dx + (b.y - TILE / 2) * b.dy) % TILE) + TILE) % TILE;
-    const lift = Math.round(Math.sin((along / TILE) * Math.PI) * 6);
-    ctx.fillStyle = "rgb(0 0 0 / 0.3)";
-    ctx.fillRect(Math.round(b.x / PX) - 4, Math.round(b.y / PX) + 4, 8, 2);
-    drawOrb(ctx, { ...b, y: b.y - lift * PX }, t);
+    const along = ((((b.x - TILE / 2) * b.dx + (b.y - TILE / 2) * b.dy) % TILE) + TILE) % TILE / TILE;
+    const u = (b.hops - along - 1) / (THROW_HOPS - 1); // 1 when it leaves the hands, 0 a tile before landing
+    const lift = b.hops < 0 ? OVERHEAD : u > 0 ? OVERHEAD * u + 24 * u * (1 - u) : Math.sin(along * Math.PI) * 6;
+    if (b.hops > 0) {
+      ctx.fillStyle = "rgb(0 0 0 / 0.3)";
+      ctx.fillRect(Math.round(b.x / PX) - 4, Math.round(b.y / PX) + 4, 8, 2);
+    }
+    drawOrb(ctx, { ...b, y: b.y - Math.round(lift) * PX }, t);
   }
 }

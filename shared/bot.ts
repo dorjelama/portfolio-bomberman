@@ -1,7 +1,7 @@
 // Bot players. A bot only produces input bits, like a keyboard, so it needn't be deterministic:
 // the server runs bots and sends their inputs to everyone like any other player's.
 import {
-  ACT, BLOCK, BOMB, COLS, DOWN, FLOOR, LEFT, RIGHT, ROWS, SPIRAL, TICK_HZ, TILE, UP, WALL, roundTicks, sideOf, tileAt,
+  ACT, BLOCK, BOMB, COLS, DOWN, FLOOR, LEFT, RIGHT, ROWS, SPIRAL, TICK_HZ, TILE, UP, WALL, ghostReady, roundTicks, sideOf, tileAt,
   type Game,
 } from "./sim.ts";
 
@@ -82,7 +82,7 @@ function haunt(g: Game, id: number) {
   if (!lines.length) return 0;
   const best = lines.sort((a, b) => Math.abs(a - pos) - Math.abs(b - pos))[0];
   if (best !== pos) return horiz ? (best < pos ? LEFT : RIGHT) : best < pos ? UP : DOWN;
-  const canThrow = !(p.prev & BOMB) && !g.bombs.some((b) => b.owner === id);
+  const canThrow = !(p.prev & BOMB) && ghostReady(g, p);
   return canThrow && Math.random() < GHOST_THROW_CHANCE ? BOMB : 0;
 }
 

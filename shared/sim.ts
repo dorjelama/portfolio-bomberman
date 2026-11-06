@@ -24,7 +24,7 @@ const BELT_SPEED = 8;
 export const KICK_SPEED = 32;
 export const INVULN = 90; // after a shield breaks
 export const GHOST_DELAY = TICK_HZ; // after a knockout, before you're back on the rim
-const THROW = 3; // a revenge orb lands this many tiles in from the rim (further if that tile is taken)
+export const GHOST_RELOAD = 5 * TICK_HZ; // a ghost's wait between throws, and from the knockout to the first one
 export const CURSE_TICKS = 10 * TICK_HZ;
 const IMMUNE_TICKS = TICK_HZ; // after passing a curse on, so it can't bounce straight back
 export const MAX_BOMBS = 8;
@@ -39,8 +39,8 @@ export const LEFT = 4;
 export const RIGHT = 8;
 export const BOMB = 16;
 export const ACT = 32; // detonate (Remote)
-const DX = [0, 0, -1, 1];
-const DY = [-1, 1, 0, 0];
+export const DX = [0, 0, -1, 1];
+export const DY = [-1, 1, 0, 0];
 
 export const FLOOR = 0;
 export const WALL = 1;
@@ -73,7 +73,8 @@ export const SWAP = 11;
 const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 10, 6, 4]; // by item id
 export const ALL_ITEMS = ITEM_WEIGHTS.reduce((mask, _, id) => (id ? mask | (1 << id) : mask), 0);
 export const ROUND_CHOICES = [60, 90, 120, 180, 300]; // seconds
-const THROW_HOPS = 3; // a gloved throw lands this many tiles away
+export const THROW_HOPS = 3; // a throw (glove, or a ghost from the rim) lands this many tiles away, further if that tile is taken
+export const HELD = -1; // a bomb's hops while someone carries it overhead
 const FLY_SPEED = TILE / 8; // units per tick in the air: one tile every 8 ticks
 
 export const REVERSED = 1;
@@ -134,6 +135,8 @@ export interface Player {
   pierce: boolean;
   napalm: boolean;
   glove: boolean;
+  carry: number; // id of the orb held overhead, 0 = none
+  threwAt: number; // tick of the last throw, for the throwing pose
   invuln: number;
   curse: number;
   curseLeft: number;
@@ -156,7 +159,7 @@ export interface Bomb {
   revenge: boolean; // lobbed in by a ghost: knocking someone out with it brings the ghost back
   dx: number; // sliding (kicked) or flying (thrown) direction
   dy: number;
-  hops: number; // tiles left in the air after a gloved throw; 0 = on the ground
+  hops: number; // tiles left in the air after a throw; 0 = on the ground, HELD = carried
 }
 
 export interface Game {
@@ -199,6 +202,7 @@ export const onRim = (c: number, r: number) => c === 0 || r === 0 || c === COLS 
 export const bombAt = (g: Game, i: number) => g.bombs.find((b) => !b.hops && tileAt(b.x, b.y) === i); // orbs in the air don't count
 export const sideOf = (g: Game, id: number) => (g.opts.teams ? g.opts.teams[id] : id);
 export const roundTicks = (g: Game) => g.opts.roundSecs * TICK_HZ;
+export const ghostReady = (g: Game, p: Player) => g.tick - Math.max(p.threwAt, p.diedAt) >= GHOST_RELOAD;
 
 // Order the walls fall in after time-out: clockwise from the top-left, outer ring first.
 export const SPIRAL: number[] = (() => {
@@ -242,6 +246,8 @@ function freshPlayer(id: number): Player {
     pierce: false,
     napalm: false,
     glove: false,
+    carry: 0,
+    threwAt: -TICK_HZ,
     invuln: 0,
     curse: 0,
     curseLeft: 0,
@@ -368,7 +374,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
 
   slideKicked(g);
   flyThrown(g);
-  for (const b of g.bombs) if (!b.remote) b.fuse--;
+  for (const b of g.bombs) if (!b.remote && b.hops !== HELD) b.fuse--; // a carried orb waits
   g.bombs = g.bombs.filter((b) => !(b.hops && b.fuse < -2 * TICK_HZ)); // can't land anywhere (the arena filled in): fizzle out
   explode(g, g.bombs.filter((b) => !b.hops && (b.fuse <= 0 || g.fire[tileAt(b.x, b.y)] > 0)));
 
@@ -432,6 +438,11 @@ function kill(g: Game, id: number) {
   const p = g.players[id];
   [p.alive, p.diedAt, p.curse, p.curseLeft] = [false, g.tick, 0, 0];
   for (const b of g.bombs) if (b.owner === id && b.remote) [b.remote, b.fuse] = [false, FUSE]; // nobody left to press the button
+  const held = g.bombs.find((b) => b.id === p.carry);
+  const t = tileAt(p.x, p.y);
+  if (held && g.grid[t] === WALL) g.bombs.splice(g.bombs.indexOf(held), 1); // crushed along with them
+  else if (held) Object.assign(held, { x: center(t % COLS), y: center(Math.floor(t / COLS)), hops: 0 }); // dropped where they fell
+  p.carry = 0;
 }
 
 // Revenge mode: after a knockout you reappear on the nearest stretch of the outer wall.
@@ -453,21 +464,14 @@ function haunt(g: Game, id: number, p: Player, input: number) {
   const c = Math.floor(p.x / TILE);
   const r = Math.floor(p.y / TILE);
   const corner = (c === 0 || c === COLS - 1) && (r === 0 || r === ROWS - 1);
-  if (input & ~p.prev & BOMB && !corner && !g.bombs.some((b) => b.owner === id)) {
-    const [dc, dr] = r === 0 ? [0, 1] : r === ROWS - 1 ? [0, -1] : c === 0 ? [1, 0] : [-1, 0]; // inward
-    for (let k = THROW; ; k++) {
-      const [tc, tr] = [c + dc * k, r + dr * k];
-      if (onRim(tc, tr)) break;
-      const i = tr * COLS + tc;
-      if (g.grid[i] === FLOOR && !bombAt(g, i)) {
-        g.bombs.push({
-          id: g.nextBomb++, owner: id, x: center(tc), y: center(tr), fuse: FUSE, range: 2,
-          remote: false, pierce: false, flame: FLAME, revenge: true, dx: 0, dy: 0, hops: 0,
-        });
-        p.stats.orbs++;
-        break;
-      }
-    }
+  if (input & ~p.prev & BOMB && !corner && ghostReady(g, p)) {
+    const d = r === 0 ? 1 : r === ROWS - 1 ? 0 : c === 0 ? 3 : 2; // inward
+    g.bombs.push({
+      id: g.nextBomb++, owner: id, x: center(c), y: center(r), fuse: FUSE, range: 2,
+      remote: false, pierce: false, flame: FLAME, revenge: true, dx: DX[d], dy: DY[d], hops: THROW_HOPS,
+    });
+    [p.dir, p.threwAt] = [d, g.tick]; // turn to face the arena as you throw
+    p.stats.orbs++;
   }
   steer(g, p, input, SPEEDS[0], true);
 }
@@ -502,13 +506,11 @@ function control(g: Game, id: number, p: Player, raw: number) {
     p.stats.orbs++;
   }
   if (pressed & ACT) {
-    // Glove: grab the orb you're on or facing and throw it. Otherwise the button detonates (Remote).
+    // Glove: pick up the orb you're on or facing. Otherwise the button detonates (Remote).
     const ahead = before + [-COLS, COLS, -1, 1][p.dir];
-    const grab = p.glove ? [before, ahead].map((i) => bombAt(g, i)).find((b) => b && !b.dx && !b.dy) : undefined;
-    if (grab) {
-      const t = tileAt(grab.x, grab.y);
-      [grab.x, grab.y, grab.dx, grab.dy, grab.hops] = [center(t % COLS), center(Math.floor(t / COLS)), DX[p.dir], DY[p.dir], THROW_HOPS];
-    } else {
+    const grab = p.glove && !p.carry ? [before, ahead].map((i) => bombAt(g, i)).find((b) => b && !b.dx && !b.dy) : undefined;
+    if (grab) [grab.hops, p.carry] = [HELD, grab.id];
+    else {
       const oldest = g.bombs.find((b) => b.owner === id && b.remote);
       if (oldest) [oldest.remote, oldest.fuse] = [false, 0];
     }
@@ -532,6 +534,15 @@ function control(g: Game, id: number, p: Player, raw: number) {
     g.items[here] = 0;
     p.stats.pickups++;
     pickUp(g, id, p, item);
+  }
+
+  // The carried orb rides along while the button is held; let go and it flies off the way you face.
+  const held = g.bombs.find((b) => b.id === p.carry);
+  if (held && raw & ACT) [held.x, held.y] = [p.x, p.y];
+  else if (held) {
+    const t = tileAt(p.x, p.y);
+    Object.assign(held, { x: center(t % COLS), y: center(Math.floor(t / COLS)), dx: DX[p.dir], dy: DY[p.dir], hops: THROW_HOPS });
+    [p.carry, p.threwAt] = [0, g.tick];
   }
 }
 
@@ -638,7 +649,7 @@ function kickAt(g: Game, i: number, d: number) {
 // if the landing tile is taken they bounce on a tile at a time.
 function flyThrown(g: Game) {
   for (const b of g.bombs) {
-    if (!b.hops) continue;
+    if (b.hops <= 0) continue;
     b.x += b.dx * FLY_SPEED;
     b.y += b.dy * FLY_SPEED;
     if ((b.x - HALF) % TILE || (b.y - HALF) % TILE) continue; // between tiles

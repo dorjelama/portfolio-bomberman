@@ -6,13 +6,13 @@ A 4-player online bomb-maze brawl set in the Critter Catch world, made for playi
 
 - **Maps:** Meadow; Ice Rink (you slide until you hit something); Factory (conveyor belts); Portal Garden (two linked pairs). Pick one in the lobby, or Random for a new map each round.
 - **Modes:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
-- **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one at a time). If your orb knocks out an opponent, you're back in their place. Nobody sits out.
+- **Revenge:** once knocked out, you ride the outer wall as a ghost, orb in hand, and lob it in (one throw every 5 seconds). If your orb knocks out an opponent, you're back in their place. Nobody sits out.
 - **Power-ups:**
   - Orb+, Fire+, Speed+, Kick, Shield, Remote
   - Pierce: blasts go through bushes
   - Napalm: your fire burns for 2 s
   - Skull: a random 10 s curse (reversed, sluggish, butterfingers or fizzle), passed on by touch
-  - Glove: throw an orb over walls, and it wraps around the edge
+  - Glove: pick up an orb and carry it overhead (its fuse waits), then throw it over walls the way you face; it wraps around the edge
   - Swap: trade places with a random opponent
 - **Awards** after each match: most knockouts, comeback kid, hot potato, bush whacker, collector, trigger happy, and "Oops!" for knocking yourself out. Name tags above every trainer show who's who.
 - **Feel:**
@@ -40,7 +40,7 @@ To play:
 Controls:
 - Move: arrows or WASD
 - Drop an orb: Space or Z
-- Detonate (with Remote): X or Shift
+- Detonate (with Remote), or hold to carry and let go to throw (with Glove): X or Shift
 - Gamepad: D-pad or left stick to move, A to drop, B or X to detonate. In the lobby, A or Start toggles ready.
 
 ## How it stays in sync

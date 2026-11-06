@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
-  ACT, BLOCK, BOMB, BUTTERFINGERS, COLS, CRUMBLE, DOWN, FLAME, FLOOR, FUSE, GHOST_DELAY, NAPALM_FLAME, OVER_TICKS,
+  ACT, BLOCK, BOMB, BUTTERFINGERS, COLS, CRUMBLE, DOWN, FLAME, FLOOR, FUSE, GHOST_DELAY, GHOST_RELOAD, LEFT, NAPALM_FLAME, OVER_TICKS,
   REVERSED, RIGHT, ROUND_TICKS, SHRINK_EVERY, SPAWNS, SPIRAL, SWAP, TICK_HZ, WALL, center, createGame, tickGame, tileAt, type Bomb,
   type Game,
   type Options,
@@ -165,7 +165,7 @@ test("four bots finish a round on their own", () => {
   assert.ok(g.round > 1 || g.phase === "over", `round still running after ${t} ticks`);
 });
 
-test("revenge: a knocked-out player rides the rim and lobs orbs inward, one at a time", () => {
+test("revenge: a knocked-out player rides the rim and lobs orbs inward, with a wait between throws", () => {
   const g = arena(3);
   place(g, 0, 1, 3); // nearest wall: the left one
   g.bombs.push(orb(2, 1, 3, { fuse: 1 }));
@@ -181,12 +181,21 @@ test("revenge: a knocked-out player rides the rim and lobs orbs inward, one at a
 
   Object.assign(p, { x: center(0), y: center(5) });
   tickGame(g, [BOMB]);
+  assert.equal(p.stats.orbs, 0, "not straight after the knockout");
+  run(g, GHOST_RELOAD);
+  tickGame(g, [BOMB]);
   const thrown = g.bombs.filter((b) => b.owner === 0);
   assert.equal(thrown.length, 1);
+  assert.ok(thrown[0].hops > 0, "thrown from the wall, in the air");
+  assert.equal(p.dir, 3, "turned to face the arena");
+  run(g, 30);
+  assert.equal(thrown[0].hops, 0, "landed");
   assert.equal(tileAt(thrown[0].x, thrown[0].y), idx(3, 5));
-  tickGame(g, []);
   tickGame(g, [BOMB]);
-  assert.equal(g.bombs.filter((b) => b.owner === 0).length, 1, "only one revenge orb at a time");
+  assert.equal(p.stats.orbs, 1, "has to wait before the next throw");
+  run(g, GHOST_RELOAD);
+  tickGame(g, [BOMB]);
+  assert.equal(p.stats.orbs, 2, "ready again");
 });
 
 test("Pierce blasts carry on through bushes; Napalm fire burns longer", () => {
@@ -260,6 +269,7 @@ test("revenge comeback: a ghost whose orb knocks someone out takes their place",
   for (const revenge of [true, false]) {
     const g = arena(3);
     const ghost = Object.assign(g.players[0], { alive: false, ghost: true, diedAt: 0, x: center(0), y: center(5) });
+    g.tick = GHOST_RELOAD; // been on the rim long enough to throw
     place(g, 1, 3, 5);
     place(g, 2, 9, 9);
     if (revenge) tickGame(g, [BOMB]); // lobbed in from the left wall: lands 3 tiles in, on player 2
@@ -285,7 +295,9 @@ test("Glove throws an orb over walls; it bounces off taken tiles and wraps aroun
     for (const i of blocks) g.grid[i] = BLOCK;
     tickGame(g, [BOMB]);
     tickGame(g, [ACT]);
-    assert.ok(g.bombs[0].hops > 0, "in the air");
+    assert.ok(g.players[0].carry, "picked up");
+    tickGame(g, []);
+    assert.ok(g.bombs[0].hops > 0, "let go: in the air");
     run(g, 40);
     const b = g.bombs[0];
     assert.equal(b.hops, 0, "landed");
@@ -294,6 +306,37 @@ test("Glove throws an orb over walls; it bounces off taken tiles and wraps aroun
   assert.equal(throwFrom(1, [idx(2, 1), idx(3, 1)]), idx(4, 1), "over two bushes");
   assert.equal(throwFrom(1, [idx(4, 1)]), idx(5, 1), "bounced off a bush");
   assert.equal(throwFrom(13, []), idx(3, 1), "over the wall, back in on the far side");
+});
+
+test("Glove: hold to carry an orb (its fuse waits), let go to throw it the way you face; drop it if knocked out", () => {
+  const g = arena(3); // a third player keeps the round going after player 1's knockout
+  place(g, 0, 5, 1);
+  place(g, 1, 7, 9);
+  g.players[0].glove = true;
+  tickGame(g, [BOMB]);
+  tickGame(g, [ACT]);
+  const b = g.bombs[0];
+  const fuse = b.fuse;
+  run(g, 45, [DOWN | ACT]); // walk two tiles down, holding it
+  assert.equal(tileAt(b.x, b.y), idx(5, 3), "carried along");
+  assert.equal(b.fuse, fuse, "fuse waits while carried");
+  tickGame(g, [LEFT | ACT]); // turn left
+  run(g, 30);
+  assert.equal(b.hops, 0);
+  assert.equal(tileAt(b.x, b.y), idx(2, 3), "thrown 3 tiles the way they faced");
+
+  place(g, 0, 5, 3);
+  tickGame(g, [ACT]);
+  assert.equal(g.players[0].carry, 0, "can't grab from two tiles away");
+  place(g, 0, 2, 3);
+  tickGame(g, []);
+  tickGame(g, [ACT]);
+  g.fire[idx(2, 3)] = FLAME; // caught in a blast while carrying
+  tickGame(g, [ACT]);
+  assert.equal(g.players[0].alive, false);
+  assert.equal(b.hops, 0, "dropped where they fell");
+  tickGame(g, []);
+  assert.equal(g.bombs.length, 0, "and the fire sets it off");
 });
 
 test("Swap trades places with an opponent; stats count orbs, bushes and own goals", () => {
@@ -388,6 +431,7 @@ test("the knockout log records who got whom: orb, own orb, walls, and a ghost co
   assert.deepEqual(g.log.map(({ victim, by, how }) => [victim, by, how]), [[0, 0, "self"], [1, 0, "orb"]]);
 
   Object.assign(g.players[1], { ghost: true, x: center(0), y: center(7) }); // player 2's ghost, left wall, row 7
+  g.tick += GHOST_RELOAD; // long enough to throw
   tickGame(g, [0, BOMB]); // lobs an orb 3 tiles in: (3, 7)
   place(g, 2, 3, 7);
   run(g, FUSE);

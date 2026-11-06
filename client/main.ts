@@ -21,7 +21,7 @@ const ITEM_HELP = [
   "Pierce: blasts go straight through bushes",
   "Napalm: your fire burns for 2 seconds",
   "Skull: a random curse for 10 s. Touch someone to pass it on!",
-  "Glove: X / Shift on (or facing) an orb throws it over walls",
+  "Glove: hold X / Shift on (or facing) an orb to carry it, let go to throw it over walls the way you face",
   "Swap: instantly trade places with a random opponent",
 ];
 const TEAM_NAMES = ["Teal & Green", "Red & Purple"]; // team = seat % 2
@@ -205,9 +205,9 @@ function listen(g: Game) {
   for (const b of g.bombs) {
     if (!heard.has(b.id)) {
       heard.add(b.id);
-      (g.players[b.owner]?.alive ? sfx.drop : sfx.lob)();
+      if (!b.hops) (g.players[b.owner]?.alive ? sfx.drop : sfx.lob)(); // one already flying gets its lob just below
     }
-    if (b.hops && !tossed.has(b.id)) {
+    if (b.hops > 0 && !tossed.has(b.id)) {
       tossed.add(b.id);
       sfx.lob();
     }
@@ -435,7 +435,7 @@ function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
     if (tag.textContent !== text) tag.textContent = text;
     if (tag.className !== cls) tag.className = cls;
     tag.style.left = `${((p.x + d.x) / PX / (COLS * 16)) * 100}%`;
-    tag.style.top = `${(((p.y + d.y) / PX - 16) / (ROWS * 16)) * 100}%`;
+    tag.style.top = `${(((p.y + d.y) / PX - (p.carry ? 28 : 16)) / (ROWS * 16)) * 100}%`; // above a carried orb
   });
 }
 
