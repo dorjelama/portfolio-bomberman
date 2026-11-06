@@ -109,7 +109,8 @@ export function botInput(g: Game, id: number): number {
 
   const unsafe = (i: number) => blocked(i) || danger[i] === 1;
   let to = firstStep(here, unsafe, (i) => g.items[i] > 0);
-  if (to < 0) to = firstStep(here, unsafe, (i) => worth(g, id, i, p.range));
+  // Out of orbs: wait. Seeking a target tile would pace between two of them, and every turn is a rollback online.
+  if (to < 0 && mine.length < p.bombs) to = firstStep(here, unsafe, (i) => worth(g, id, i, p.range));
   if (to < 0 && Math.random() < 0.05) {
     const wander = here + STEPS[Math.floor(Math.random() * 4)]; // nothing to do: shuffle about
     if (!unsafe(wander)) to = wander;
