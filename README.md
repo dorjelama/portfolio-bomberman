@@ -21,13 +21,14 @@ A 4-player online bomb-maze brawl on the farm, made for playing with friends in 
   - Swap: trade places with a random opponent
   - Frost: your blasts leave ice for 5 s
   - Gust: every orb on the ground slides off the way you face
-- **Awards** after each match: most knockouts, comeback kid, bad apple (curses and potatoes passed on), crate cracker, collector, carrot top, trigger happy, and "Oops!" for knocking yourself out. Name tags above every farmer show who's who.
+- **Awards** after each match: most knockouts, comeback kid, bad apple (curses and potatoes passed on), crate cracker, collector, carrot top, trigger happy, "Oops!" for knocking yourself out, and "Cheater!". Name tags above every farmer show who's who.
 - **Feel:**
   - Sound effects and an original chiptune loop, synthesised in the browser (no audio files), with Sound and Music toggles.
   - Gamepads work.
   - Rollback corrections glide instead of snapping.
   - The lobby shows match wins for the evening.
   - KO feed, "Close call!" when someone's blast just misses you, and an announcer (DOUBLE KO!, COMEBACK!, FINAL TWO!, OOPS!...). Each player switches these on or off for their own screen, next to the volume sliders.
+- **Cheats** (a room rule, off by default): during a match everyone gets a cheat bar under the arena, with keys. God mode (G) means blasts and tractors can't touch you; walls and the potato still can, so rounds still end. Everyone sees a halo over your hat. There's also Max out (M: orbs, fire and speed to the top), Lift curse (C) and any power-up (1 to 0 for the first ten, the bar for the rest). Cheats go through the input stream like a key press, so rollback keeps everyone in sync.
 - **Everything is switchable:** the Game and Map pickers, a checkbox per power-up (the Skull covers every curse), and the room rules.
 
 ## Run it
@@ -50,6 +51,7 @@ Controls:
 - Move: arrows or WASD
 - Drop an orb: Space or Z
 - Detonate (with Remote), or hold to carry and let go to throw (with Glove): X or Shift
+- Cheats, when the room turns them on: G god mode, M max out, C lift curse, 1 to 0 power-ups (or click the cheat bar)
 - Gamepad: D-pad or left stick to move, A to drop, B or X to detonate. In the lobby, A or Start toggles ready.
 
 ## How it stays in sync
