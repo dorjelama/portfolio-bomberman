@@ -7,7 +7,7 @@ import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { botInput } from "../shared/bot.ts";
 import { InputQueue } from "../shared/netcode.ts";
-import { ALL_ITEMS, MAPS, ROUND_CHOICES, TICK_HZ, createGame, sideOf, tickGame, type Game } from "../shared/sim.ts";
+import { ALL_ITEMS, MAPS, ROUND_CHOICES, TICK_HZ, createGame, freshStats, sideOf, tickGame, type Game, type Stats } from "../shared/sim.ts";
 
 const PORT = Number(process.env.PORT) || 8000;
 const SEATS = 4;
@@ -67,6 +67,7 @@ interface Room {
   game: Game | null;
   roster: Seat[]; // sim player i = roster[i]
   tally: Map<string, { name: string; wins: number }>; // match wins tonight, by client token ("bots" for all bots)
+  totals: Map<string, { name: string; stats: Stats }>; // award stats summed over tonight's matches, by client token ("bot<seat>" per bot)
 }
 
 // shortcut: rooms live in this process's memory; fine for one instance, needs shared state to scale out.
@@ -92,6 +93,7 @@ function sendLobby(room: Room) {
       tally: [...room.tally]
         .map(([k, e]) => ({ name: room.clients.find((x) => x.token === k)?.name ?? e.name, wins: e.wins, you: k === c.token }))
         .sort((a, b) => b.wins - a.wins),
+      totals: [...room.totals].map(([k, e]) => ({ name: room.clients.find((x) => x.token === k)?.name ?? e.name, stats: e.stats, you: k === c.token })),
       countdown: Math.ceil(room.countdown / TICK_HZ),
       playing: !!room.game,
     });
@@ -135,6 +137,13 @@ function endMatch(room: Room) {
     });
     for (const [key, name] of winners) room.tally.set(key, { name, wins: (room.tally.get(key)?.wins ?? 0) + 1 });
   }
+  room.roster.forEach((r, i) => {
+    if (!g) return;
+    const key = r.client?.token ?? `bot${r.seat}`;
+    const stats = room.totals.get(key)?.stats ?? freshStats();
+    for (const k in stats) stats[k as keyof Stats] += g.players[i].stats[k as keyof Stats];
+    room.totals.set(key, { name: r.name, stats });
+  });
   room.game = null;
   room.roster = [];
   room.clients = room.clients.filter((c) => c.ws); // whoever never came back loses their seat
@@ -246,8 +255,9 @@ wss.on("connection", (ws, req) => {
   const code = new URL(req.url ?? "", "http://x").searchParams.get("room")?.toLowerCase() ?? "";
   if (!/^[a-z0-9]{4,8}$/.test(code)) return ws.close(1008, "bad room");
   let room = rooms.get(code);
+  const fresh = !room;
   if (!room) {
-    room = { code, clients: [], bots: true, settings: { ...DEFAULT_SETTINGS }, countdown: 0, game: null, roster: [], tally: new Map() };
+    room = { code, clients: [], bots: true, settings: { ...DEFAULT_SETTINGS }, countdown: 0, game: null, roster: [], tally: new Map(), totals: new Map() };
     rooms.set(code, room);
   }
   const r = room;
@@ -262,7 +272,11 @@ wss.on("connection", (ws, req) => {
     if (!m || typeof m !== "object") return;
     const msg = m as Record<string, unknown>;
     if (me) handle(r, me, msg);
-    else if (msg.type === "hello") me = join(r, ws, msg);
+    else if (msg.type === "hello") {
+      me = join(r, ws, msg);
+      // A new room (first visit, everyone left, or a server restart) takes its creator's last rules; handle() validates them.
+      if (me && fresh) handle(r, me, { ...(msg.settings as object), type: "settings" });
+    }
   });
   ws.on("close", () => {
     if (me) leave(r, me);

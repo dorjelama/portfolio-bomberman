@@ -79,6 +79,7 @@ interface Lobby {
   bots: boolean;
   settings: { map: number; teams: boolean; winRounds: number; roundSecs: number; revenge: boolean; shrink: boolean; items: number };
   tally: { name: string; wins: number; you: boolean }[];
+  totals: { name: string; stats: Stats; you: boolean }[]; // award stats summed over every match in this room
   countdown: number;
   playing: boolean;
 }
@@ -107,7 +108,11 @@ function connect() {
   ws = s;
   s.onopen = () => {
     connected = true;
-    send({ type: "hello", token: storage.get(() => sessionStorage, "token"), name: storage.get(() => localStorage, "name") });
+    let settings = null;
+    try {
+      settings = JSON.parse(storage.get(() => localStorage, "settings") ?? "null");
+    } catch {}
+    send({ type: "hello", token: storage.get(() => sessionStorage, "token"), name: storage.get(() => localStorage, "name"), settings });
   };
   s.onmessage = (e) => onMessage(JSON.parse(e.data));
   s.onclose = () => {
@@ -129,6 +134,7 @@ function onMessage(m: any) {
   if (m.type === "welcome") storage.set(() => sessionStorage, "token", m.token);
   else if (m.type === "lobby") {
     lobby = m;
+    storage.set(() => localStorage, "settings", JSON.stringify(m.settings)); // brought back if the room has to be recreated
     if (!m.playing) tl = null; // match over: freeze the last board behind the lobby
     showLobby();
   } else if (m.type === "start") {
@@ -343,6 +349,7 @@ function showLobby() {
   $<HTMLInputElement>("bots").checked = l.bots;
   $("tally").textContent = l.tally.map((e) => `${e.you ? "You" : e.name} ${e.wins}`).join(" · ");
   showAwards($("lastAwards"), lastAwards);
+  showAwards($("roomAwards"), awards(l.totals.map((e) => ({ name: e.you ? "You" : e.name, stats: e.stats }))));
   mapPick.value = String(l.settings.map);
   modePick.value = l.settings.teams ? "teams" : "ffa";
   winsPick.value = String(l.settings.winRounds);
@@ -376,11 +383,11 @@ $("legend").append(
 // ---------- awards ----------
 let lastAwards: string[] = []; // from the match that just ended, shown again in the lobby
 
-function awards(g: Game) {
+function awards(players: { name: string; stats: Stats }[]) {
   return AWARDS.flatMap(([key, title, say]) => {
-    const best = Math.max(...g.players.map((p) => p.stats[key]));
+    const best = Math.max(...players.map((p) => p.stats[key]));
     if (best < 1) return [];
-    const who = g.players.flatMap((p, i) => (p.stats[key] === best ? [nameOf(i)] : []));
+    const who = players.flatMap((p) => (p.stats[key] === best ? [p.name] : []));
     return [`${title}: ${who.join(" & ")} (${say(best)})`];
   });
 }
@@ -481,7 +488,7 @@ function hud() {
   else if (g.phase === "ready") [title, sub] = [`Round ${g.round}: ${MAPS[g.map]}`, "Ready…"];
   else if (g.phase === "result") title = g.roundWinner < 0 ? "Draw!" : won(g.roundWinner, "round");
   else if (g.phase === "over") [title, sub] = [won(g.matchWinner, "match"), "Back to the lobby in a moment…"];
-  if (tl && g.phase === "over") lastAwards = awards(g);
+  if (tl && g.phase === "over") lastAwards = awards(g.players.map((p, i) => ({ name: nameOf(i), stats: p.stats })));
   const toast =
     !tl || g.phase !== "play"
       ? ""

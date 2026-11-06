@@ -115,7 +115,7 @@ export interface Stats {
   comebacks: number;
   orbs: number; // dropped or thrown
 }
-const freshStats = (): Stats => ({ kos: 0, oops: 0, bushes: 0, pickups: 0, curses: 0, comebacks: 0, orbs: 0 });
+export const freshStats = (): Stats => ({ kos: 0, oops: 0, bushes: 0, pickups: 0, curses: 0, comebacks: 0, orbs: 0 });
 
 export interface Player {
   x: number;
