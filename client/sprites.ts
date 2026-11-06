@@ -1,11 +1,13 @@
 // Original pixel art as string grids: one char per pixel, "." is transparent.
 // Arena tiles and players come from free packs in client/art: Harvest Summer by SnowHex (grass, fences,
-// stumps) and Super Retro Ranch by Gif (crates, the farmer).
+// stumps) and Super Retro Ranch by Gif (crates, the farmer, the carrot and potato).
+import carrotUrl from "./art/ranch-carrot.png";
 import farmerUrl from "./art/ranch-farmer.png";
 import fencesUrl from "./art/harvest-fences.png";
 import tilesUrl from "./art/harvest-tiles.png";
 import treesUrl from "./art/harvest-trees.png";
 import ranchUrl from "./art/ranch-objects.png";
+import potatoUrl from "./art/ranch-potato.png";
 
 const PALETTE: Record<string, string> = {
   k: "#1b1b2f", // outline
@@ -30,6 +32,7 @@ const PALETTE: Record<string, string> = {
   g: "#5aa83e", // bush
   G: "#8fd468",
   d: "#3d7f2c",
+  B: "#9fd0e6", // frost
 };
 // ---------- new art for Boom Orbs ----------
 const ORB = [
@@ -48,7 +51,7 @@ const ORB = [
   "....kkkkkk....",
 ];
 
-// Power-up icons, indexed by item id in shared/sim.ts (1 = Orb+ … 11 = Swap).
+// Power-up icons, indexed by item id in shared/sim.ts (1 = Orb+ … 13 = Gust). The Harvest crop (14) is pack art, below.
 const ICONS = [
   [],
   ["....kYk...", "....kbk...", "..kkkkkk..", ".kNwnnnnk.", "kNwnnnnnnk", "kcccccccck", "knnnnnnnnk", ".knnnnnnk.", "..kkkkkk..", ".........."],
@@ -62,6 +65,28 @@ const ICONS = [
   ["..kkkkkk..", ".kwwwwwwk.", "kwwwwwwwwk", "kwkkwwkkwk", "kwkkwwkkwk", "kwwwwkwwwk", ".kwwwwwwk.", "..kwkwkwk.", "..kkkkkkk.", ".........."],
   ["..k.k.k...", ".kwkwkwk..", ".kwkwkwk..", ".kwwwwwwk.", "kkwwwwwwk.", "kwkwwwwwk.", ".kwwwwwwk.", "..kwwwwk..", "..kRRRRk..", "..kkkkkk.."],
   ["......k...", "kkkkkkYk..", "kYYYYYYYk.", "kkkkkkYk..", "......k...", "...k......", "..ktkkkkkk", ".ktttttttk", "..ktkkkkkk", "...k......"],
+  ["....kk....", ".k.kBBk.k.", "kBkkwwkkBk", ".kBBwwBBk.", "kkwwwwwwkk", "kkwwwwwwkk", ".kBBwwBBk.", "kBkkwwkkBk", ".k.kBBk.k.", "....kk...."],
+  ["......kkk.", ".....kBBBk", "kkkkkkkkBk", "BBBBBBBBBk", "kkkkkkkkk.", "..kkkkkkk.", "..BBBBBBBk", "..kkkkkkBk", "......kBk.", ".......k.."],
+];
+
+// Tractor Lane's tractor, facing right (flipped to drive left).
+const TRACTOR_ART = [
+  "................",
+  "......kkkk......",
+  "......kwwk......",
+  "......kwwk......",
+  "..kk..kwwk......",
+  "..kk.kkkkkkkk...",
+  "..kkkccccccccck.",
+  "..kccccccccccYk.",
+  ".kccccccccccccck",
+  ".kcckkkkcccccck.",
+  "kkkRRRRkkkkkkk..",
+  "kRRrrrRRk.kRRk..",
+  "kRrrkrrRk.kRrRk.",
+  "kRRrrrRRk.kRRk..",
+  ".kkRRRRkk..kk...",
+  "..kkkkkk........",
 ];
 
 // Ground for the special maps: ice, a conveyor segment (drawn pointing right; rotated per direction), a portal.
@@ -159,7 +184,9 @@ const sheet = async (url: string) => {
   await img.decode();
   return img;
 };
-const [TILES, FENCE_SHEET, TREES, RANCH, FARMER] = await Promise.all([tilesUrl, fencesUrl, treesUrl, ranchUrl, farmerUrl].map(sheet));
+const [TILES, FENCE_SHEET, TREES, RANCH, FARMER, CARROT, POTATO] = await Promise.all(
+  [tilesUrl, fencesUrl, treesUrl, ranchUrl, farmerUrl, carrotUrl, potatoUrl].map(sheet)
+);
 function cut(src: CanvasImageSource, x: number, y: number) {
   const c = document.createElement("canvas");
   c.width = c.height = 16;
@@ -201,6 +228,10 @@ function farmer(row: number, col: number, color: string) {
 // TRAINERS[player][dir][frame]; dir order matches the sim (up, down, left, right), frames are stand, walk, walk.
 export const TRAINERS = COLORS.map((color) => [3, 0, 1, 2].map((row) => [1, 0, 2].map((col) => farmer(row, col, color))));
 export const ITEM_TILES = ICONS.map((icon) => (icon.length ? itemTile(icon) : null));
+export const CROP_IMG = cut(CARROT, 16, 0); // Harvest's crop: the sheet's second frame is the carrot
+ITEM_TILES.push(CROP_IMG); // item 14
+export const POTATO_IMG = cut(POTATO, 0, 0);
+export const TRACTOR_IMG = toCanvas(TRACTOR_ART);
 
 // Rotate a grid a quarter turn clockwise.
 const turn = (rows: string[]) => [...rows[0]].map((_, x) => rows.map((r) => r[x]).reverse().join(""));

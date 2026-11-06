@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
-  ACT, BLOCK, BOMB, BUTTERFINGERS, COLS, CRUMBLE, DOWN, FLAME, FLOOR, FUSE, GHOST_DELAY, GHOST_RELOAD, LEFT, NAPALM_FLAME, OVER_TICKS,
-  REVERSED, RIGHT, ROUND_TICKS, SHRINK_EVERY, SPAWNS, SPIRAL, SWAP, TICK_HZ, WALL, center, createGame, tickGame, tileAt, type Bomb,
+  ACT, BELT, BLOCK, BOMB, BUTTERFINGERS, COLS, CROP, CRUMBLE, DOWN, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
+  HARVEST, ICE, LANES, LEFT, NAPALM_FLAME, OVER_TICKS, POTATO, READY_TICKS, RESPAWN_TICKS, REVERSED, RIGHT, ROBBED, ROUND_TICKS, SKULL,
+  SHRINK_EVERY, SPAWNS, SPIRAL, SWAP, TICK_HZ, TRACTOR, WALL, center, createGame, roundTicks, tickGame, tileAt, tractor, type Bomb,
   type Game,
   type Options,
 } from "./sim.ts";
@@ -14,7 +15,7 @@ const run = (g: Game, ticks: number, inputs: number[] = []) => {
 };
 const place = (g: Game, id: number, c: number, r: number) => Object.assign(g.players[id], { x: center(c), y: center(r) });
 const orb = (owner: number, c: number, r: number, extra: Partial<Bomb> = {}): Bomb => ({
-  id: 900 + owner, owner, x: center(c), y: center(r), fuse: 999, range: 1, remote: false, pierce: false, flame: FLAME,
+  id: 900 + owner, owner, x: center(c), y: center(r), fuse: 999, range: 1, remote: false, pierce: false, frost: false, flame: FLAME,
   revenge: false, dx: 0, dy: 0, hops: 0, ...extra,
 });
 const MIXED: Partial<Options> = { map: -1, teams: [0, 1, 0, 1] }; // random map each round, 2v2
@@ -39,15 +40,19 @@ test("a new round has border walls, pillars, blocks and open spawn corners", () 
   assert.ok(g.grid.filter((t) => t === BLOCK).length > 50);
 });
 
-test("same seed + same inputs replay identically, and a saved state resumes identically (rollback)", () => {
-  const a = createGame(4, 42, MIXED);
+test("same seed + same inputs replay identically, and a saved state resumes identically (rollback), in every mode", () => {
+  for (const mode of [0, HARVEST, POTATO]) replays({ ...MIXED, mode });
+});
+
+function replays(opts: Partial<Options>) {
+  const a = createGame(4, 42, opts);
   const log: number[][] = [];
   for (let t = 0; t < 4000; t++) {
     const inputs = a.players.map((_, id) => botInput(a, id));
     log.push(inputs);
     tickGame(a, inputs);
   }
-  const b = createGame(4, 42, MIXED);
+  const b = createGame(4, 42, opts);
   let saved: Game | null = null;
   log.forEach((inputs, t) => {
     if (t === 2000) saved = structuredClone(b);
@@ -57,7 +62,7 @@ test("same seed + same inputs replay identically, and a saved state resumes iden
   const resumed = saved!;
   for (const inputs of log.slice(2000)) tickGame(resumed, inputs);
   assert.deepEqual(resumed, a);
-});
+}
 
 test("pillars block you; corner assist slips you into a nearby open lane", () => {
   const g = arena();
@@ -158,11 +163,13 @@ test("two round wins take the match, then a fresh match starts", () => {
   assert.deepEqual(g.players.map((p) => p.wins), [0, 0]);
 });
 
-test("four bots finish a round on their own", () => {
-  const g = createGame(4, 7);
-  let t = 0;
-  while (g.round === 1 && g.phase !== "over" && t++ < 20000) tickGame(g, g.players.map((_, id) => botInput(g, id)));
-  assert.ok(g.round > 1 || g.phase === "over", `round still running after ${t} ticks`);
+test("four bots finish a round on their own, in every mode and on Tractor Lane", () => {
+  for (const opts of [{}, { mode: HARVEST }, { mode: POTATO }, { map: TRACTOR }]) {
+    const g = createGame(4, 7, opts);
+    let t = 0;
+    while (g.round === 1 && g.phase !== "over" && t++ < 20000) tickGame(g, g.players.map((_, id) => botInput(g, id)));
+    assert.ok(g.round > 1 || g.phase === "over", `${JSON.stringify(opts)}: round still running after ${t} ticks`);
+  }
 });
 
 test("revenge: a knocked-out player rides the rim and lobs orbs inward, with a wait between throws", () => {
@@ -442,4 +449,125 @@ test("the knockout log records who got whom: orb, own orb, walls, and a ghost co
   place(g, 3, SPIRAL[0] % COLS, Math.floor(SPIRAL[0] / COLS));
   run(g, SHRINK_EVERY);
   assert.deepEqual([g.log.at(-1)!.victim, g.log.at(-1)!.how], [3, "wall"]);
+});
+
+test("Frost blasts leave ice that thaws back to the map's own floor", () => {
+  const g = arena(2, { map: 2 }); // Factory: row 5 is a belt
+  g.bombs.push(orb(0, 3, 5, { fuse: 1, frost: true }));
+  tickGame(g, []);
+  assert.equal(g.floor[idx(3, 5)], ICE, "the belt froze");
+  assert.equal(g.floor[idx(3, 4)], ICE, "and the grass");
+  run(g, FROST_TICKS - 1);
+  assert.equal(g.floor[idx(3, 4)], ICE);
+  run(g, 1);
+  assert.equal(g.floor[idx(3, 5)], BELT + 3, "a belt again");
+  assert.equal(g.floor[idx(3, 4)], GRASS);
+});
+
+test("Gust blows every orb on the ground the way you face", () => {
+  const g = arena();
+  place(g, 0, 1, 1);
+  g.bombs.push(orb(1, 5, 3), orb(1, 7, 7, { id: 950 }));
+  g.items[idx(2, 1)] = GUST;
+  run(g, 15, [RIGHT]); // picks it up facing right
+  run(g, 100);
+  assert.deepEqual(g.bombs.map((b) => [tileAt(b.x, b.y), b.dx]), [[idx(13, 3), 0], [idx(13, 7), 0]]);
+});
+
+test("Butterfingers: orbs drop by themselves, and Remote and Glove stop working", () => {
+  const g = arena();
+  place(g, 0, 3, 3);
+  Object.assign(g.players[0], { curse: BUTTERFINGERS, curseLeft: 999, remote: true, glove: true, bombs: 2 });
+  g.bombs.push(orb(0, 7, 7, { remote: true, id: 950 })); // a remote orb from before the curse
+  tickGame(g, []);
+  const dropped = g.bombs.find((b) => b.id !== 950)!;
+  assert.equal(dropped.remote, false, "dropped orbs keep their fuse");
+  tickGame(g, [ACT]);
+  assert.equal(g.players[0].carry, 0, "the glove can't pick it up");
+  assert.ok(g.bombs.some((b) => b.id === 950), "the button doesn't set off remote orbs");
+});
+
+test("Robbed takes every power-up from whoever picks up that Skull, and can't be passed on", () => {
+  // The Skull's curse is random: try boards until one hands out Robbed.
+  const pickUpSkull = (seed: number) => {
+    const g = arena();
+    g.seed = seed;
+    place(g, 0, 3, 3);
+    Object.assign(g.players[0], { bombs: 3, range: 4, speed: 2, glove: true, frost: true, shield: true });
+    g.items[idx(3, 3)] = SKULL;
+    tickGame(g, []);
+    return g;
+  };
+  const g = Array.from({ length: 50 }, (_, seed) => pickUpSkull(seed)).find((b) => b.players[0].curse === ROBBED);
+  assert.ok(g, "some board hands out Robbed");
+  const p0 = g.players[0];
+  assert.deepEqual([p0.bombs, p0.range, p0.speed, p0.glove, p0.frost, p0.shield], [1, 2, 0, false, false, false]);
+
+  const p1 = Object.assign(g.players[1], { bombs: 3, glove: true });
+  place(g, 1, 3, 3); // walk into them
+  tickGame(g, []);
+  assert.deepEqual([p1.curse, p1.bombs, p1.glove], [0, 3, true], "touching them doesn't rob you");
+  assert.equal(p0.curse, ROBBED);
+});
+
+test("Hot Potato: someone gets it at Go, a touch passes it on, and it knocks out whoever holds it at the end", () => {
+  const g = createGame(3, 5, { mode: POTATO });
+  run(g, READY_TICKS);
+  assert.equal(g.phase, "play");
+  assert.equal(g.players.filter((p) => p.potato).length, 1);
+  const holder = g.players.find((p) => p.potato)!;
+  const other = g.players.find((p) => p !== holder)!;
+  Object.assign(other, { x: holder.x, y: holder.y });
+  tickGame(g, []);
+  assert.ok(other.potato > 0 && !holder.potato, "passed on");
+  assert.equal(holder.stats.curses, 1);
+
+  other.potato = 1;
+  tickGame(g, []);
+  assert.equal(other.alive, false);
+  assert.equal(g.log.at(-1)!.how, "potato");
+  assert.equal(g.players.filter((p) => p.alive && p.potato).length, 1, "a fresh one goes to someone still standing");
+});
+
+test("Harvest: crops count, a knockout spills half and you respawn, and the most crops win at 0:00", () => {
+  const g = arena(2, { mode: HARVEST });
+  assert.deepEqual([g.opts.shrink, g.opts.revenge], [false, false]);
+  const p = g.players[0];
+  place(g, 0, 3, 3);
+  g.items[idx(4, 3)] = CROP;
+  run(g, 15, [RIGHT]);
+  assert.deepEqual([p.crops, p.stats.crops, p.stats.pickups], [1, 1, 0]);
+
+  p.crops = 5;
+  g.bombs.push(orb(1, 4, 3, { fuse: 1 }));
+  tickGame(g, []);
+  assert.equal(p.alive, false);
+  assert.equal(g.phase, "play", "the last one standing doesn't end it");
+  assert.equal(p.crops, 2);
+  assert.equal(g.items.filter((it) => it === CROP).length, 3, "the rest spilled");
+  run(g, RESPAWN_TICKS);
+  assert.ok(p.alive);
+  assert.equal(tileAt(p.x, p.y), idx(1, 1), "back at the corner");
+  assert.equal(p.crops, 2);
+
+  g.roundTick = roundTicks(g) - 1;
+  run(g, 1);
+  assert.equal(g.phase, "result");
+  assert.equal(g.roundWinner, 0);
+});
+
+test("Tractor Lane: the road stays clear, a warning comes first, then the tractor flattens orbs and whoever's in the way", () => {
+  const fresh = createGame(2, 1, { map: TRACTOR });
+  for (const [row] of LANES) for (let c = 1; c < COLS - 1; c++) assert.equal(fresh.grid[row * COLS + c], FLOOR);
+
+  const g = arena(3, { map: TRACTOR });
+  const [row] = LANES[0];
+  assert.ok(tractor(g, 0).warn);
+  place(g, 0, 7, row);
+  g.bombs.push(orb(1, 9, row));
+  run(g, 4 * TICK_HZ);
+  assert.equal(g.players[0].alive, false);
+  assert.equal(g.log.at(-1)!.how, "tractor");
+  assert.equal(g.bombs.length, 0, "squashed");
+  assert.equal(g.fire[idx(9, row)], 0, "without a bang");
 });

@@ -4,22 +4,30 @@ A 4-player online bomb-maze brawl set in the Critter Catch world, made for playi
 
 **Status: milestone 4.** It's online, with invite links, a lobby and rollback netcode; bots fill empty seats. It has sound, music and gamepad support, and keeps score for the evening.
 
-- **Maps:** Meadow; Ice Rink (you slide until you hit something); Factory (conveyor belts); Portal Garden (two linked pairs). Pick one in the lobby, or Random for a new map each round.
-- **Modes:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
+- **Maps:** Meadow; Ice Rink (you slide until you hit something); Factory (conveyor belts); Portal Garden (two linked pairs); Night Farm (you only see what your lantern, fire and lit orbs light up); Tractor Lane (two roads; arrows flash, then a tractor drives through and flattens whoever, and whatever orb, is in the way). Pick one in the lobby, or Random for a new map each round.
+- **Games:**
+  - Classic: last one standing.
+  - Harvest: broken bushes drop carrots. A knockout spills half of yours and you're back at your corner 2 s later; most carrots at 0:00 wins.
+  - Hot Potato: someone gets the potato at Go. Touch someone to pass it on before its 15 s run out.
+- **Teams:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
 - **Revenge:** once knocked out, you ride the outer wall as a ghost, orb in hand, and lob it in (one throw every 5 seconds). If your orb knocks out an opponent, you're back in their place. Nobody sits out.
 - **Power-ups:**
   - Orb+, Fire+, Speed+, Kick, Shield, Remote
   - Pierce: blasts go through bushes
   - Napalm: your fire burns for 2 s
-  - Skull: a random 10 s curse (reversed, sluggish, butterfingers or fizzle), passed on by touch
+  - Skull: a random 10 s curse: reversed, sluggish, butterfingers (orbs drop by themselves, and Remote and Glove stop working) or fizzle, all passed on by touch; or robbed (you lose every power-up, and it can't be passed on)
   - Glove: pick up an orb and carry it overhead (its fuse waits), then throw it over walls the way you face; it wraps around the edge
   - Swap: trade places with a random opponent
-- **Awards** after each match: most knockouts, comeback kid, hot potato, bush whacker, collector, trigger happy, and "Oops!" for knocking yourself out. Name tags above every trainer show who's who.
+  - Frost: your blasts leave ice for 5 s
+  - Gust: every orb on the ground slides off the way you face
+- **Awards** after each match: most knockouts, comeback kid, hot potato, bush whacker, collector, top farmer, trigger happy, and "Oops!" for knocking yourself out. Name tags above every trainer show who's who.
 - **Feel:**
   - Sound effects and an original chiptune loop, synthesised in the browser (no audio files), with Sound and Music toggles.
   - Gamepads work.
   - Rollback corrections glide instead of snapping.
   - The lobby shows match wins for the evening.
+  - Kill feed, "Close call!" when someone's blast just misses you, and an announcer (DOUBLE KO!, COMEBACK!, FINAL TWO!, OOPS!...). Each player switches these on or off for their own screen, next to the volume sliders.
+- **Everything is switchable:** the Game and Map pickers, a checkbox per power-up (the Skull covers every curse), and the room rules.
 
 ## Run it
 

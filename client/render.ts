@@ -1,6 +1,11 @@
 // Draws one game state. seats[i] is sim player i's seat, which picks their colours.
-import { BELT, BLOCK, COLS, CRUMBLE, DX, DY, FLAME, FLOOR, FUSE, ICE, PORTAL, ROWS, THROW_HOPS, TILE, WALL, type Bomb, type Game } from "../shared/sim.ts";
-import { BELTS, BLOCKS, CURSE_MARK, FENCES, FLOWERS, GRASS, ICE_IMG, ITEM_TILES, ORBS, PILLAR, PORTAL_IMG, TRAINERS } from "./sprites.ts";
+import {
+  BELT, BLOCK, COLS, CRUMBLE, DX, DY, FLAME, FLOOR, FUSE, ICE, LANES, NIGHT, PORTAL, ROWS, THROW_HOPS, TICK_HZ, TILE, TRACTOR, WALL, tractor,
+  type Bomb, type Game,
+} from "../shared/sim.ts";
+import {
+  BELTS, BLOCKS, CURSE_MARK, FENCES, FLOWERS, GRASS, ICE_IMG, ITEM_TILES, ORBS, PILLAR, PORTAL_IMG, POTATO_IMG, TRACTOR_IMG, TRAINERS,
+} from "./sprites.ts";
 
 const PX = TILE / 16; // sim units per screen pixel
 const OVERHEAD = 18; // px above a player's centre where a carried orb sits, on the hat
@@ -73,6 +78,7 @@ function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: n
   ctx.globalAlpha = 1;
   if (p.ghost && !lean) drawOrb(ctx, { x: x * PX, y: (y - OVERHEAD) * PX, remote: false, fuse: FUSE }, t); // ghosts always hold one, except mid-throw
   if (p.curse && (t >> 3) % 2) ctx.drawImage(CURSE_MARK, x - 5, y - 27);
+  if (p.potato) ctx.drawImage(POTATO_IMG, x - 8, y - 34 - ((t >> (p.potato < 3 * TICK_HZ ? 1 : 3)) % 2)); // jiggles faster near the end
   if (p.shield) {
     ctx.strokeStyle = "rgb(63 208 203 / 0.8)";
     ctx.beginPath();
@@ -81,11 +87,68 @@ function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: n
   }
 }
 
-// nudge[i]: extra offset for player i, easing out a rollback correction.
-export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], nudge: { x: number; y: number }[] = []) {
+// Night Farm: everything outside the lights is dark. Only your own lantern is lit, so others lurk until a blast shows them.
+const dark = document.createElement("canvas");
+dark.width = COLS * 16;
+dark.height = ROWS * 16;
+function night(ctx: CanvasRenderingContext2D, g: Game, me: number, nudge: { x: number; y: number }[]) {
+  const d = dark.getContext("2d")!;
+  d.globalCompositeOperation = "source-over";
+  d.fillStyle = "rgb(6 8 28 / 0.94)";
+  d.fillRect(0, 0, dark.width, dark.height);
+  d.globalCompositeOperation = "destination-out";
+  const light = (x: number, y: number, r: number) => {
+    const glow = d.createRadialGradient(x, y, r * 0.4, x, y, r);
+    glow.addColorStop(0, "#000");
+    glow.addColorStop(1, "rgb(0 0 0 / 0)");
+    d.fillStyle = glow;
+    d.fillRect(x - r, y - r, 2 * r, 2 * r);
+  };
+  const mine = g.players[me];
+  const lit = mine && (mine.alive || mine.ghost) ? [me] : g.players.map((_, i) => i); // watching, or just knocked out: see everyone
+  for (const i of lit) {
+    const p = g.players[i];
+    if (p.alive || p.ghost) light((p.x + (nudge[i]?.x ?? 0)) / PX, (p.y + (nudge[i]?.y ?? 0)) / PX - 4, 40);
+  }
+  g.fire.forEach((f, i) => f && light((i % COLS) * 16 + 8, Math.floor(i / COLS) * 16 + 8, 24));
+  for (const b of g.bombs) light(b.x / PX, b.y / PX, 12 + ((g.tick >> 3) % 2) * 2); // the fuse sparks
+  ctx.drawImage(dark, 0, 0);
+}
+
+// Tractor Lane: arrows flash at the road's start while a tractor's coming, then it drives through.
+function tractors(ctx: CanvasRenderingContext2D, g: Game) {
+  LANES.forEach(([row, dir], k) => {
+    const { x, warn } = tractor(g, k);
+    const y = row * 16;
+    if (warn && (g.tick >> 3) % 2) {
+      ctx.fillStyle = "#ff6b4a";
+      for (const c of [1, 2, 3]) {
+        const ax = (dir > 0 ? c : COLS - 1 - c) * 16 + 8;
+        ctx.beginPath();
+        ctx.moveTo(ax + dir * 5, y + 8);
+        ctx.lineTo(ax - dir * 3, y + 3);
+        ctx.lineTo(ax - dir * 3, y + 13);
+        ctx.fill();
+      }
+    }
+    if (x === null) return;
+    ctx.save();
+    ctx.translate(Math.round(x / PX), y);
+    ctx.scale(dir, 1);
+    ctx.drawImage(TRACTOR_IMG, -8, -2);
+    ctx.restore();
+  });
+}
+
+// nudge[i]: extra offset for player i, easing out a rollback correction. me: whose lantern lights Night Farm.
+export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], nudge: { x: number; y: number }[] = [], me = -1) {
   const t = g.tick;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(field, 0, 0);
+  if (g.map === TRACTOR) {
+    ctx.fillStyle = "#9b7a4f"; // the dirt road
+    for (const [row] of LANES) ctx.fillRect(16, row * 16 + 1, (COLS - 2) * 16, 14);
+  }
   for (let i = COLS; i < g.grid.length; i++) {
     if (g.grid[i] === WALL) continue;
     const x = (i % COLS) * 16;
@@ -139,4 +202,6 @@ export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], 
     }
     drawOrb(ctx, { ...b, y: b.y - Math.round(lift) * PX }, t);
   }
+  tractors(ctx, g);
+  if (g.map === NIGHT) night(ctx, g, me, nudge);
 }

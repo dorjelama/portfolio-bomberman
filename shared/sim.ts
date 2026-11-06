@@ -52,7 +52,17 @@ export const GRASS = 0;
 export const ICE = 1;
 export const BELT = 2; // BELT + d is a conveyor moving in direction d (2..5)
 export const PORTAL = 6;
-export const MAPS = ["Meadow", "Ice Rink", "Factory", "Portal Garden"];
+export const MAPS = ["Meadow", "Ice Rink", "Factory", "Portal Garden", "Night Farm", "Tractor Lane"];
+export const NIGHT = 4; // Meadow rules; the screen only lights what's near you
+export const TRACTOR = 5;
+// Tractor Lane: [row, direction] for each lane. Odd rows, so no stumps in the way.
+export const LANES = [
+  [5, 1],
+  [7, -1],
+];
+const TRACTOR_EVERY = 8 * TICK_HZ; // each lane's cycle; the second lane runs half a cycle behind
+export const TRACTOR_WARN = 2 * TICK_HZ; // warning before it drives in
+const TRACTOR_STEP = 6; // ticks per tile
 const PORTAL_PAIRS = [
   [3 * COLS + 3, 9 * COLS + 11],
   [3 * COLS + 11, 9 * COLS + 3],
@@ -70,7 +80,19 @@ export const NAPALM = 8;
 export const SKULL = 9;
 export const GLOVE = 10;
 export const SWAP = 11;
-const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 10, 6, 4]; // by item id
+export const FROST = 12;
+export const GUST = 13;
+export const CROP = 14; // Harvest mode only: not a power-up, so it has no weight and no checkbox
+const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 10, 6, 4, 6, 5]; // by item id
+export const FROST_TICKS = 5 * TICK_HZ; // how long Frost ice lasts
+const CROP_CHANCE = 0.5; // Harvest: a broken bush drops a crop this often, else the usual power-up roll
+export const RESPAWN_TICKS = 2 * TICK_HZ; // Harvest: from a knockout back to your corner
+export const POTATO_TICKS = 15 * TICK_HZ;
+
+export const CLASSIC = 0;
+export const HARVEST = 1;
+export const POTATO = 2;
+export const MODES = ["Classic", "Harvest", "Hot Potato"];
 export const ALL_ITEMS = ITEM_WEIGHTS.reduce((mask, _, id) => (id ? mask | (1 << id) : mask), 0);
 export const ROUND_CHOICES = [60, 90, 120, 180, 300]; // seconds
 export const THROW_HOPS = 3; // a throw (glove, or a ghost from the rim) lands this many tiles away, further if that tile is taken
@@ -79,9 +101,10 @@ const FLY_SPEED = TILE / 8; // units per tick in the air: one tile every 8 ticks
 
 export const REVERSED = 1;
 export const SLUGGISH = 2;
-export const BUTTERFINGERS = 3; // drops orbs on its own
+export const BUTTERFINGERS = 3; // drops orbs on its own; Remote and Glove don't work
 export const FIZZLE = 4; // blasts reach one tile
-export const CURSES = ["", "Reversed", "Sluggish", "Butterfingers", "Fizzle"];
+export const ROBBED = 5; // takes every power-up, for good; the only curse you can't pass on
+export const CURSES = ["", "Reversed", "Sluggish", "Butterfingers", "Fizzle", "Robbed"];
 
 export type Phase = "ready" | "play" | "result" | "over";
 
@@ -94,14 +117,16 @@ export interface Options {
   shrink: boolean; // sudden death: walls close in at time-out; otherwise time-out is a draw
   revenge: boolean; // knocked-out players come back as ghosts on the rim
   items: number; // which power-ups can drop: bit (1 << item id)
+  mode: number; // index into MODES
 }
 
-// One knockout, for the match summary. by = who lit the fire (-1 for the walls); back = their ghost came back in.
+// One knockout, for the match summary. by = who lit the fire (-1 for walls, potatoes and tractors); back = their ghost came back in.
 export interface Knockout {
+  tick: number;
   round: number;
   victim: number;
   by: number;
-  how: "orb" | "ghost" | "self" | "team" | "wall";
+  how: "orb" | "ghost" | "self" | "team" | "wall" | "potato" | "tractor";
   back: boolean;
 }
 
@@ -114,8 +139,9 @@ export interface Stats {
   curses: number; // curses passed on
   comebacks: number;
   orbs: number; // dropped or thrown
+  crops: number; // picked up, in Harvest
 }
-export const freshStats = (): Stats => ({ kos: 0, oops: 0, bushes: 0, pickups: 0, curses: 0, comebacks: 0, orbs: 0 });
+export const freshStats = (): Stats => ({ kos: 0, oops: 0, bushes: 0, pickups: 0, curses: 0, comebacks: 0, orbs: 0, crops: 0 });
 
 export interface Player {
   x: number;
@@ -135,6 +161,9 @@ export interface Player {
   pierce: boolean;
   napalm: boolean;
   glove: boolean;
+  frost: boolean;
+  crops: number; // Harvest: held right now
+  potato: number; // Hot Potato: ticks until it goes off, 0 = not holding it
   carry: number; // id of the orb held overhead, 0 = none
   threwAt: number; // tick of the last throw, for the throwing pose
   invuln: number;
@@ -155,6 +184,7 @@ export interface Bomb {
   range: number;
   remote: boolean;
   pierce: boolean;
+  frost: boolean; // its blast leaves ice
   flame: number; // how long its fire burns
   revenge: boolean; // lobbed in by a ghost: knocking someone out with it brings the ghost back
   dx: number; // sliding (kicked) or flying (thrown) direction
@@ -180,6 +210,7 @@ export interface Game {
   fireBy: number[]; // who lit each burning tile, for knockout credit
   fireRevenge: number[]; // 1 where that fire came from a ghost's orb
   crumble: number[];
+  thaw: number[]; // ticks until Frost ice goes back to the map's own floor
   bombs: Bomb[];
   nextBomb: number;
   shrink: number; // index into SPIRAL of the next wall to fall
@@ -203,6 +234,17 @@ export const bombAt = (g: Game, i: number) => g.bombs.find((b) => !b.hops && til
 export const sideOf = (g: Game, id: number) => (g.opts.teams ? g.opts.teams[id] : id);
 export const roundTicks = (g: Game) => g.opts.roundSecs * TICK_HZ;
 export const ghostReady = (g: Game, p: Player) => g.tick - Math.max(p.threwAt, p.diedAt) >= GHOST_RELOAD;
+
+// Tractor Lane: where lane k's tractor is (its centre x), or null while it's off the board; warn = it's about to drive in.
+// Worked out from the round clock alone, so there's nothing to save or roll back.
+export function tractor(g: Game, k: number): { x: number | null; warn: boolean } {
+  if (g.map !== TRACTOR || g.phase !== "play") return { x: null, warn: false };
+  const t = (g.roundTick + (k * TRACTOR_EVERY) / 2) % TRACTOR_EVERY;
+  if (t < TRACTOR_WARN) return { x: null, warn: true };
+  const along = Math.floor(((t - TRACTOR_WARN) * TILE) / TRACTOR_STEP) - HALF; // drives in from half a tile off the edge
+  if (along > COLS * TILE + HALF) return { x: null, warn: false };
+  return { x: LANES[k][1] > 0 ? along : COLS * TILE - along, warn: false };
+}
 
 // Order the walls fall in after time-out: clockwise from the top-left, outer ring first.
 export const SPIRAL: number[] = (() => {
@@ -246,6 +288,9 @@ function freshPlayer(id: number): Player {
     pierce: false,
     napalm: false,
     glove: false,
+    frost: false,
+    crops: 0,
+    potato: 0,
     carry: 0,
     threwAt: -TICK_HZ,
     invuln: 0,
@@ -265,7 +310,7 @@ export function createGame(players: number, seed: number, opts: Partial<Options>
     seed: seed | 0,
     opts: {
       map: 0, winRounds: WIN_ROUNDS, teams: null, rematch: true,
-      roundSecs: ROUND_TICKS / TICK_HZ, shrink: true, revenge: true, items: ALL_ITEMS,
+      roundSecs: ROUND_TICKS / TICK_HZ, shrink: true, revenge: true, items: ALL_ITEMS, mode: CLASSIC,
       ...opts,
     },
     map: 0,
@@ -282,12 +327,14 @@ export function createGame(players: number, seed: number, opts: Partial<Options>
     fireBy: [],
     fireRevenge: [],
     crumble: [],
+    thaw: [],
     bombs: [],
     nextBomb: 1,
     shrink: 0,
     log: [],
     players: Array.from({ length: players }, (_, id) => freshPlayer(id)),
   };
+  if (g.opts.mode === HARVEST) Object.assign(g.opts, { shrink: false, revenge: false }); // you respawn instead, and 0:00 counts the crops
   newRound(g);
   return g;
 }
@@ -303,6 +350,7 @@ function newRound(g: Game) {
   g.map = g.opts.map >= 0 ? g.opts.map : Math.floor(rand(g) * MAPS.length);
   const safe = new Set<number>(PARTNER.keys()); // portals start uncovered
   for (const [c, r] of SPAWNS) for (const [dc, dr] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) safe.add((r + dr) * COLS + c + dc);
+  if (g.map === TRACTOR) for (const [r] of LANES) for (let c = 0; c < COLS; c++) safe.add(r * COLS + c); // the road stays clear
   const n = COLS * ROWS;
   g.floor = Array.from({ length: n }, (_, i) => floorFor(g.map, i % COLS, Math.floor(i / COLS)));
   g.grid = Array.from({ length: n }, (_, i) => {
@@ -316,6 +364,7 @@ function newRound(g: Game) {
   g.fireBy = Array(n).fill(-1);
   g.fireRevenge = Array(n).fill(0);
   g.crumble = Array(n).fill(0);
+  g.thaw = Array(n).fill(0);
   g.bombs = [];
   g.shrink = 0;
   g.roundTick = 0;
@@ -337,6 +386,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     }
     if (g.phase === "ready") {
       g.phase = "play";
+      if (g.opts.mode === POTATO) givePotato(g);
       return;
     }
     if (g.phase === "over") {
@@ -357,6 +407,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
   for (let i = 0; i < g.fire.length; i++) {
     if (g.fire[i]) g.fire[i]--;
     if (g.crumble[i] && --g.crumble[i] === 0) g.grid[i] = FLOOR;
+    if (g.thaw[i] && --g.thaw[i] === 0) g.floor[i] = floorFor(g.map, i % COLS, Math.floor(i / COLS));
   }
 
   // Rotate who acts first, so same-tick ties (two orbs on one tile) don't always favour player 1.
@@ -367,6 +418,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     const input = inputs[id] ?? 0;
     if (p.alive) control(g, id, p, input);
     else if (p.ghost) haunt(g, id, p, input);
+    else if (g.opts.mode === HARVEST && g.tick - p.diedAt >= RESPAWN_TICKS) respawn(g, id);
     else if (g.opts.revenge && g.tick - p.diedAt >= GHOST_DELAY) toRim(p);
     p.prev = input;
   }
@@ -386,26 +438,40 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     g.bombs = g.bombs.filter((b) => b.hops || tileAt(b.x, b.y) !== i);
   }
 
+  // Tractors flatten orbs (no bang) and knock out whoever they reach.
+  const tractors = LANES.flatMap(([row], k) => {
+    const { x } = tractor(g, k);
+    return x === null ? [] : [{ row, x }];
+  });
+  const runOver = (x: number, y: number, reach: number) => tractors.some((t) => Math.floor(y / TILE) === t.row && Math.abs(x - t.x) < reach);
+  if (tractors.length) g.bombs = g.bombs.filter((b) => b.hops || !runOver(b.x, b.y, HALF));
+
   g.players.forEach((p, id) => {
     if (!p.alive) return;
     if (p.invuln) p.invuln--;
     const i = tileAt(p.x, p.y);
+    const flattened = runOver(p.x, p.y, TILE);
     if (g.grid[i] === WALL) {
       kill(g, id);
-      g.log.push({ round: g.round, victim: id, by: -1, how: "wall", back: false });
-    }
-    else if (g.fire[i] && !p.invuln) {
+      logKo(g, id, -1, "wall");
+    } else if ((g.fire[i] || flattened) && !p.invuln) {
       if (p.shield) [p.shield, p.invuln] = [false, INVULN];
-      else knockedOut(g, id, i);
+      else if (g.fire[i]) knockedOut(g, id, i);
+      else {
+        kill(g, id);
+        logKo(g, id, -1, "tractor");
+      }
     }
   });
 
   // The round ends the moment one side (a player, or a team) is left standing, and play freezes, so a falling wall
   // or a stray blast can't take a clear win away. Only knockouts in the very same tick make a draw.
+  // Harvest runs to 0:00 (knocked-out players respawn) and the crops decide.
+  const harvest = g.opts.mode === HARVEST;
   const sides = new Set(g.players.flatMap((p, id) => (p.alive ? [sideOf(g, id)] : [])));
   const timeUp = !g.opts.shrink && g.roundTick >= limit; // no sudden death: time's up, it's a draw
-  if (sides.size > 1 && !timeUp) return;
-  g.roundWinner = sides.size === 1 ? g.players.findIndex((p) => p.alive) : -1;
+  if ((harvest || sides.size > 1) && !timeUp) return;
+  g.roundWinner = harvest ? cropLeader(g) : sides.size === 1 ? g.players.findIndex((p) => p.alive) : -1;
   if (g.roundWinner >= 0) {
     const side = sideOf(g, g.roundWinner);
     g.players.forEach((p, id) => sideOf(g, id) === side && p.wins++);
@@ -421,8 +487,7 @@ function knockedOut(g: Game, id: number, i: number) {
   kill(g, id);
   const by = g.fireBy[i];
   const team = by >= 0 && by !== id && sideOf(g, by) === sideOf(g, id);
-  const entry: Knockout = { round: g.round, victim: id, by, how: by === id ? "self" : team ? "team" : g.fireRevenge[i] ? "ghost" : "orb", back: false };
-  g.log.push(entry);
+  const entry = logKo(g, id, by, by === id ? "self" : team ? "team" : g.fireRevenge[i] ? "ghost" : "orb");
   if (by === id) g.players[id].stats.oops++;
   if (by < 0 || by === id || team) return;
   const killer = g.players[by];
@@ -434,15 +499,57 @@ function knockedOut(g: Game, id: number, i: number) {
   entry.back = true;
 }
 
+function logKo(g: Game, victim: number, by: number, how: Knockout["how"]) {
+  const entry: Knockout = { tick: g.tick, round: g.round, victim, by, how, back: false };
+  g.log.push(entry);
+  return entry;
+}
+
 function kill(g: Game, id: number) {
   const p = g.players[id];
-  [p.alive, p.diedAt, p.curse, p.curseLeft] = [false, g.tick, 0, 0];
+  const potato = p.potato;
+  [p.alive, p.diedAt, p.curse, p.curseLeft, p.potato] = [false, g.tick, 0, 0, 0];
   for (const b of g.bombs) if (b.owner === id && b.remote) [b.remote, b.fuse] = [false, FUSE]; // nobody left to press the button
   const held = g.bombs.find((b) => b.id === p.carry);
   const t = tileAt(p.x, p.y);
   if (held && g.grid[t] === WALL) g.bombs.splice(g.bombs.indexOf(held), 1); // crushed along with them
   else if (held) Object.assign(held, { x: center(t % COLS), y: center(Math.floor(t / COLS)), hops: 0 }); // dropped where they fell
   p.carry = 0;
+  if (p.crops) {
+    const lost = Math.ceil(p.crops / 2);
+    p.crops -= lost;
+    spill(g, t, lost);
+  }
+  if (potato) givePotato(g);
+}
+
+// Harvest: a knocked-out player's crops land on the nearest free ground, for anyone to grab.
+function spill(g: Game, from: number, n: number) {
+  const far = (i: number) => Math.abs((i % COLS) - (from % COLS)) + Math.abs(Math.floor(i / COLS) - Math.floor(from / COLS));
+  const free = g.grid.flatMap((t, i) => (t === FLOOR && !g.items[i] && !g.fire[i] && !bombAt(g, i) ? [i] : []));
+  for (const i of free.sort((a, b) => far(a) - far(b) || a - b).slice(0, n)) g.items[i] = CROP;
+}
+
+// Harvest: back at your corner with fresh power-ups, keeping the crops you didn't drop.
+function respawn(g: Game, id: number) {
+  const { wins, stats, prev, crops } = g.players[id];
+  Object.assign(g.players[id], freshPlayer(id), { wins, stats, prev, crops, invuln: INVULN });
+}
+
+// Harvest: a player on the side holding the most crops, or -1 on a tie.
+function cropLeader(g: Game) {
+  const total = new Map<number, number>();
+  g.players.forEach((p, id) => total.set(sideOf(g, id), (total.get(sideOf(g, id)) ?? 0) + p.crops));
+  const best = Math.max(...total.values());
+  const top = [...total].filter(([, n]) => n === best);
+  return top.length === 1 ? g.players.findIndex((_, id) => sideOf(g, id) === top[0][0]) : -1;
+}
+
+// Hot Potato: a fresh potato for a random player still standing.
+function givePotato(g: Game) {
+  const standing = g.players.filter((p) => p.alive);
+  const p = standing[Math.floor(rand(g) * standing.length)];
+  if (p) p.potato = POTATO_TICKS;
 }
 
 // Revenge mode: after a knockout you reappear on the nearest stretch of the outer wall.
@@ -468,7 +575,7 @@ function haunt(g: Game, id: number, p: Player, input: number) {
     const d = r === 0 ? 1 : r === ROWS - 1 ? 0 : c === 0 ? 3 : 2; // inward
     g.bombs.push({
       id: g.nextBomb++, owner: id, x: center(c), y: center(r), fuse: FUSE, range: 2,
-      remote: false, pierce: false, flame: FLAME, revenge: true, dx: DX[d], dy: DY[d], hops: THROW_HOPS,
+      remote: false, pierce: false, frost: false, flame: FLAME, revenge: true, dx: DX[d], dy: DY[d], hops: THROW_HOPS,
     });
     [p.dir, p.threwAt] = [d, g.tick]; // turn to face the arena as you throw
     p.stats.orbs++;
@@ -479,13 +586,21 @@ function haunt(g: Game, id: number, p: Player, input: number) {
 const flip = (v: number) => (v & ~15) | ((v & UP) << 1) | ((v & DOWN) >> 1) | ((v & LEFT) << 1) | ((v & RIGHT) >> 1);
 
 function control(g: Game, id: number, p: Player, raw: number) {
+  if (p.potato === 1) {
+    kill(g, id); // kill() hands a fresh potato to someone else
+    logKo(g, id, -1, "potato");
+    return;
+  }
+  if (p.potato) p.potato--;
   if (p.curseLeft && --p.curseLeft === 0) p.curse = 0;
   if (p.immune) p.immune--;
   const input = p.curse === REVERSED ? flip(raw) : raw;
+  const fumble = p.curse === BUTTERFINGERS; // orbs drop by themselves, and the button does nothing
+  const act = fumble ? 0 : raw & ACT;
   const pressed = raw & ~p.prev;
   const before = tileAt(p.x, p.y);
 
-  if ((pressed & BOMB || p.curse === BUTTERFINGERS) && !bombAt(g, before) && g.bombs.filter((b) => b.owner === id).length < p.bombs) {
+  if ((pressed & BOMB || fumble) && !bombAt(g, before) && g.bombs.filter((b) => b.owner === id).length < p.bombs) {
     const c = before % COLS;
     const r = Math.floor(before / COLS);
     g.bombs.push({
@@ -495,8 +610,9 @@ function control(g: Game, id: number, p: Player, raw: number) {
       y: center(r),
       fuse: FUSE,
       range: p.curse === FIZZLE ? 1 : p.range,
-      remote: p.remote,
+      remote: p.remote && !fumble,
       pierce: p.pierce,
+      frost: p.frost,
       flame: p.napalm ? NAPALM_FLAME : FLAME,
       revenge: false,
       dx: 0,
@@ -505,7 +621,7 @@ function control(g: Game, id: number, p: Player, raw: number) {
     });
     p.stats.orbs++;
   }
-  if (pressed & ACT) {
+  if (act & ~p.prev) {
     // Glove: pick up the orb you're on or facing. Otherwise the button detonates (Remote).
     const ahead = before + [-COLS, COLS, -1, 1][p.dir];
     const grab = p.glove && !p.carry ? [before, ahead].map((i) => bombAt(g, i)).find((b) => b && !b.dx && !b.dy) : undefined;
@@ -532,13 +648,16 @@ function control(g: Game, id: number, p: Player, raw: number) {
   if (g.items[here] && g.grid[here] === FLOOR) {
     const item = g.items[here];
     g.items[here] = 0;
-    p.stats.pickups++;
-    pickUp(g, id, p, item);
+    if (item === CROP) [p.crops, p.stats.crops] = [p.crops + 1, p.stats.crops + 1];
+    else {
+      p.stats.pickups++;
+      pickUp(g, id, p, item);
+    }
   }
 
   // The carried orb rides along while the button is held; let go and it flies off the way you face.
   const held = g.bombs.find((b) => b.id === p.carry);
-  if (held && raw & ACT) [held.x, held.y] = [p.x, p.y];
+  if (held && act) [held.x, held.y] = [p.x, p.y];
   else if (held) {
     const t = tileAt(p.x, p.y);
     Object.assign(held, { x: center(t % COLS), y: center(Math.floor(t / COLS)), dx: DX[p.dir], dy: DY[p.dir], hops: THROW_HOPS });
@@ -563,17 +682,32 @@ function steer(g: Game, p: Player, input: number, speed: number, rim: boolean) {
   if (order.length) p.dir = order[0];
 }
 
-// Whoever carries a curse hands it to the first player they touch.
+// Whoever carries a curse (or the potato) hands it to the first player they touch.
 function passCurses(g: Game) {
   for (const a of g.players) {
-    if (!a.alive || !a.curse) continue;
+    if (!a.alive || (!a.curse && !a.potato)) continue;
     const t = tileAt(a.x, a.y);
-    const b = g.players.find((q) => q !== a && q.alive && !q.curse && !q.immune && tileAt(q.x, q.y) === t);
-    if (!b) continue;
-    [b.curse, b.curseLeft] = [a.curse, a.curseLeft];
-    [a.curse, a.curseLeft, a.immune] = [0, 0, IMMUNE_TICKS];
-    a.stats.curses++;
+    const touching = (q: Player) => q !== a && q.alive && !q.immune && tileAt(q.x, q.y) === t;
+    const b = a.curse && a.curse !== ROBBED ? g.players.find((q) => touching(q) && !q.curse) : undefined; // Robbed stays with you
+    if (b) {
+      catchCurse(b, a.curse, a.curseLeft);
+      [a.curse, a.curseLeft, a.immune] = [0, 0, IMMUNE_TICKS];
+      a.stats.curses++;
+    }
+    const c = a.potato ? g.players.find(touching) : undefined;
+    if (c) {
+      [c.potato, a.potato, a.immune] = [a.potato, 0, IMMUNE_TICKS]; // the clock keeps running
+      a.stats.curses++;
+    }
   }
+}
+
+// Robbed takes every power-up, for good, from whoever picks up that Skull.
+function catchCurse(p: Player, curse: number, left: number) {
+  [p.curse, p.curseLeft] = [curse, left];
+  if (curse !== ROBBED) return;
+  const { bombs, range, speed, kick, remote, shield, pierce, napalm, glove, frost } = freshPlayer(0);
+  Object.assign(p, { bombs, range, speed, kick, remote, shield, pierce, napalm, glove, frost });
 }
 
 function pickUp(g: Game, id: number, p: Player, item: number) {
@@ -585,9 +719,12 @@ function pickUp(g: Game, id: number, p: Player, item: number) {
   else if (item === REMOTE) p.remote = true;
   else if (item === PIERCE) p.pierce = true;
   else if (item === NAPALM) p.napalm = true;
-  else if (item === SKULL) [p.curse, p.curseLeft] = [1 + Math.floor(rand(g) * (CURSES.length - 1)), CURSE_TICKS];
+  else if (item === SKULL) catchCurse(p, 1 + Math.floor(rand(g) * (CURSES.length - 1)), CURSE_TICKS);
   else if (item === GLOVE) p.glove = true;
-  else if (item === SWAP) {
+  else if (item === FROST) p.frost = true;
+  else if (item === GUST) {
+    for (const b of g.bombs) if (!b.hops) [b.dx, b.dy] = [DX[p.dir], DY[p.dir]]; // every orb on the ground slides off
+  } else if (item === SWAP) {
     // Trade places with a random opponent, right now.
     const foes = g.players.filter((q, j) => q.alive && sideOf(g, j) !== sideOf(g, id));
     const q = foes[Math.floor(rand(g) * foes.length)];
@@ -704,6 +841,7 @@ function explode(g: Game, lit: Bomb[]) {
     const burn = (i: number) => {
       g.fire[i] = Math.max(g.fire[i], b.flame);
       [g.fireBy[i], g.fireRevenge[i]] = [b.owner, b.revenge ? 1 : 0];
+      if (b.frost) [g.floor[i], g.thaw[i]] = [ICE, FROST_TICKS];
     };
     burn(r * COLS + c);
     for (let d = 0; d < 4; d++) {
@@ -716,7 +854,8 @@ function explode(g: Game, lit: Bomb[]) {
           break;
         }
         if (t === BLOCK) {
-          [g.grid[i], g.crumble[i], g.items[i]] = [CRUMBLE, FLAME, rollItem(g)];
+          const crop = g.opts.mode === HARVEST && rand(g) < CROP_CHANCE;
+          [g.grid[i], g.crumble[i], g.items[i]] = [CRUMBLE, FLAME, crop ? CROP : rollItem(g)];
           g.players[b.owner].stats.bushes++;
           if (b.pierce) continue; // Pierce: the blast carries on through
           break;

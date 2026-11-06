@@ -1,7 +1,7 @@
 import { Timeline } from "../shared/netcode.ts";
 import {
-  ACT, BOMB, COLS, CURSES, DOWN, LEFT, MAPS, RIGHT, ROUND_CHOICES, ROWS, TICK_HZ, TILE, UP, createGame, roundTicks, sideOf, tileAt,
-  type Game, type Knockout, type Stats,
+  ACT, BOMB, COLS, CROP, CURSES, DOWN, HARVEST, LANES, LEFT, MAPS, MODES, NIGHT, RIGHT, ROBBED, ROUND_CHOICES, ROWS, TICK_HZ, TILE, UP,
+  createGame, roundTicks, sideOf, tileAt, tractor, type Game, type Knockout, type Stats,
 } from "../shared/sim.ts";
 import { music, setVolume, sfx, unlock, volume } from "./audio.ts";
 import { render } from "./render.ts";
@@ -20,10 +20,13 @@ const ITEM_HELP = [
   "Remote: your orbs wait for X / Shift",
   "Pierce: blasts go straight through bushes",
   "Napalm: your fire burns for 2 seconds",
-  "Skull: a random curse for 10 s. Touch someone to pass it on!",
+  "Skull: a random 10 s curse: reversed, sluggish, butterfingers (orbs drop by themselves, no Remote or Glove) or fizzle, which you pass on by touch; or robbed: you lose every power-up, and it stays with you",
   "Glove: hold X / Shift on (or facing) an orb to carry it, let go to throw it over walls the way you face",
   "Swap: instantly trade places with a random opponent",
+  "Frost: your blasts leave ice for 5 seconds",
+  "Gust: blows every orb on the ground the way you face",
 ];
+const MODE_HINTS = ["Ready…", "Harvest: most crops at 0:00 wins. Knocked out? You drop half.", "Hot Potato: don't be holding it when it goes off!"];
 const TEAM_NAMES = ["Teal & Green", "Red & Purple"]; // team = seat % 2
 // End-of-match awards: [stat, title, how to say the number]. Only shown when someone scored at least 1.
 const AWARDS: [keyof Stats, string, (n: number) => string][] = [
@@ -32,6 +35,7 @@ const AWARDS: [keyof Stats, string, (n: number) => string][] = [
   ["curses", "Hot potato", (n) => `passed on ${n} curse${n === 1 ? "" : "s"}`],
   ["bushes", "Bush whacker", (n) => `${n} bush${n === 1 ? "" : "es"}`],
   ["pickups", "Collector", (n) => `${n} power-up${n === 1 ? "" : "s"}`],
+  ["crops", "Top farmer", (n) => `${n} crop${n === 1 ? "" : "s"}`],
   ["orbs", "Trigger happy", (n) => `${n} orb${n === 1 ? "" : "s"}`],
   ["oops", "Oops!", (n) => `own orb ×${n}`],
 ];
@@ -53,6 +57,21 @@ const storage = {
     } catch {}
   },
 };
+
+// ---------- display extras: each player switches these for their own screen ----------
+const prefs = { feed: true, close: true, callout: true };
+try {
+  Object.assign(prefs, JSON.parse(storage.get(() => localStorage, "prefs") ?? "{}"));
+} catch {}
+for (const k of ["feed", "close", "callout"] as const) {
+  const box = $<HTMLInputElement>(`${k}Pref`);
+  box.checked = !!prefs[k];
+  box.onchange = () => {
+    prefs[k] = box.checked;
+    storage.set(() => localStorage, "prefs", JSON.stringify(prefs));
+    box.blur(); // so Space goes back to the game
+  };
+}
 
 // ---------- room: the URL is the invite, as in Critter Catch ----------
 let room = new URLSearchParams(location.search).get("room")?.toLowerCase() ?? "";
@@ -77,7 +96,7 @@ interface Lobby {
   code: string;
   seats: (LobbySeat | null)[];
   bots: boolean;
-  settings: { map: number; teams: boolean; winRounds: number; roundSecs: number; revenge: boolean; shrink: boolean; items: number };
+  settings: { map: number; teams: boolean; winRounds: number; roundSecs: number; revenge: boolean; shrink: boolean; items: number; mode: number };
   tally: { name: string; wins: number; you: boolean }[];
   totals: { name: string; stats: Stats; you: boolean }[]; // award stats summed over every match in this room
   countdown: number;
@@ -206,7 +225,11 @@ let lastKit: number[] = [];
 let lastCurse = 0;
 let lastShrink = 0;
 let lastTile = -1;
+let lastFire: number[] = [];
+let lastPotato = 0;
+let lastWarn = false;
 let backUntil = 0; // show "You're back in!" until then
+let closeUntil = 0; // ...and "Close call!"
 function listen(g: Game) {
   for (const b of g.bombs) {
     if (!heard.has(b.id)) {
@@ -232,6 +255,13 @@ function listen(g: Game) {
   const far = (a: number, b: number) => Math.abs((a % COLS) - (b % COLS)) + Math.abs(Math.floor(a / COLS) - Math.floor(b / COLS)) > 1;
   if (tile >= 0 && lastTile >= 0 && far(tile, lastTile)) sfx.whoosh(); // swapped or through a portal
   lastTile = tile;
+  // Close call: someone else's blast lands right next to you and you're still standing.
+  const near = tile >= 0 && !g.fire[tile] ? [tile - COLS, tile + COLS, tile - 1, tile + 1] : [];
+  if (prefs.close && near.some((i) => g.fire[i] && !lastFire[i] && g.fireBy[i] !== me)) closeUntil = performance.now() + 1200;
+  lastFire = g.fire.slice();
+  const warn = LANES.some((_, k) => tractor(g, k).warn);
+  if (warn && !lastWarn) sfx.rumble();
+  lastWarn = warn;
 
   if (g.phase !== lastPhase && lastPhase) {
     if (g.phase === "ready") sfx.ready();
@@ -245,11 +275,13 @@ function listen(g: Game) {
   lastHurry = hurry;
 
   const p = g.players[me];
-  const kit = p ? [p.bombs, p.range, p.speed, +p.kick, +p.remote, +p.shield, +p.pierce, +p.napalm] : [];
+  const kit = p ? [p.bombs, p.range, p.speed, +p.kick, +p.remote, +p.shield, +p.pierce, +p.napalm, +p.glove, +p.frost, p.crops] : [];
   if (p?.alive && kit.some((v, i) => v > lastKit[i])) sfx.pickup();
   lastKit = kit;
   if (p?.curse && !lastCurse) sfx.curse();
   lastCurse = p?.curse ?? 0;
+  if (p?.potato && !lastPotato) sfx.curse();
+  lastPotato = p?.potato ?? 0;
   if (g.shrink > lastShrink) sfx.tick(g.shrink % 2 === 0); // a wall fell
   lastShrink = g.shrink;
 }
@@ -263,6 +295,7 @@ document.addEventListener("visibilitychange", () => {
 
 // ---------- lobby ----------
 const FACES = TRAINERS.map((dirs) => dirs[1][0].toDataURL());
+const CROP_ICON = ITEM_TILES[CROP]!.toDataURL();
 const nameInput = $<HTMLInputElement>("name");
 nameInput.value = storage.get(() => localStorage, "name") ?? "";
 nameInput.onchange = () => {
@@ -270,6 +303,7 @@ nameInput.onchange = () => {
   send({ type: "name", name: nameInput.value });
 };
 $<HTMLInputElement>("bots").onchange = (e) => send({ type: "bots", on: (e.target as HTMLInputElement).checked });
+const gamePick = $<HTMLSelectElement>("gameType");
 const mapPick = $<HTMLSelectElement>("map");
 const modePick = $<HTMLSelectElement>("mode");
 const winsPick = $<HTMLSelectElement>("wins");
@@ -277,6 +311,7 @@ const timePick = $<HTMLSelectElement>("time");
 const revengePick = $<HTMLInputElement>("revenge");
 const shrinkPick = $<HTMLInputElement>("shrink");
 mapPick.append(...["Random", ...MAPS].map((name, i) => new Option(name, String(i - 1))));
+gamePick.append(...MODES.map((name, i) => new Option(name, String(i))));
 timePick.append(...ROUND_CHOICES.map((s) => new Option(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`, String(s))));
 // One checkbox per power-up, with its icon.
 const itemPicks = ITEM_HELP.flatMap((help, id) => {
@@ -299,8 +334,9 @@ const sendSettings = () =>
     revenge: revengePick.checked,
     shrink: shrinkPick.checked,
     items: itemPicks.reduce((mask, { id, box }) => (box.checked ? mask | (1 << id) : mask), 0),
+    mode: Number(gamePick.value),
   });
-for (const el of [mapPick, modePick, winsPick, timePick, revengePick, shrinkPick, ...itemPicks.map((p) => p.box)]) el.onchange = sendSettings;
+for (const el of [gamePick, mapPick, modePick, winsPick, timePick, revengePick, shrinkPick, ...itemPicks.map((p) => p.box)]) el.onchange = sendSettings;
 const toggleReady = () => send({ type: "ready", ready: !lobby?.seats.find((s) => s?.you)?.ready });
 $("ready").onclick = toggleReady;
 for (const k of ["sound", "music"] as const) {
@@ -356,6 +392,8 @@ function showLobby() {
   timePick.value = String(l.settings.roundSecs);
   revengePick.checked = l.settings.revenge;
   shrinkPick.checked = l.settings.shrink;
+  gamePick.value = String(l.settings.mode);
+  revengePick.disabled = shrinkPick.disabled = l.settings.mode === HARVEST; // Harvest respawns you and runs to 0:00
   for (const { id, box } of itemPicks) box.checked = !!(l.settings.items & (1 << id));
   const mine = l.seats.find((s) => s?.you);
   const taken = l.seats.flatMap((s, seat) => (s || l.bots ? [seat] : []));
@@ -406,6 +444,8 @@ function showAwards(list: HTMLElement, items: string[]) {
 function sentence(k: Knockout) {
   const name = (i: number, start: boolean) => (i === me ? (start ? "You" : "you") : nameOf(i));
   if (k.how === "wall") return `${name(k.victim, true)} got crushed by the walls`;
+  if (k.how === "tractor") return `${name(k.victim, true)} got run over by the tractor`;
+  if (k.how === "potato") return k.victim === me ? "Your potato went off" : `${nameOf(k.victim)}'s potato went off`;
   if (k.how === "self") return k.victim === me ? "You knocked yourself out" : `${nameOf(k.victim)} knocked themselves out`;
   const by = k.how === "ghost" ? (k.by === me ? "Your ghost" : `${nameOf(k.by)}'s ghost`) : name(k.by, true);
   const text = `${by} knocked out ${k.how === "team" ? "teammate " : ""}${name(k.victim, false)}`;
@@ -426,6 +466,46 @@ function showLog(g: Game) {
   );
 }
 
+// ---------- kill feed and announcer: worked out from the knockout log alone, so a rewind corrects them too ----------
+const FEED_TICKS = 4 * TICK_HZ;
+let lastFeed = "";
+function showFeed(g: Game) {
+  const recent = tl && prefs.feed ? g.log.filter((k) => g.tick - k.tick < FEED_TICKS).slice(-4).reverse() : [];
+  const lines = recent.map(sentence);
+  if (lines.join("|") === lastFeed) return;
+  lastFeed = lines.join("|");
+  $("feed").replaceChildren(...lines.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
+}
+
+const KO_CALLS: Partial<Record<Knockout["how"], string>> = {
+  self: "OOPS!", team: "FRIENDLY FIRE!", wall: "CRUSHED!", potato: "KABOOM!", tractor: "FLATTENED!",
+};
+function callout(g: Game) {
+  const k = g.log.at(-1);
+  if (!k || g.tick - k.tick >= 2 * TICK_HZ) return "";
+  const scored = (e: Knockout) => (e.how === "orb" || e.how === "ghost") && e.by === k.by && k.tick - e.tick < 3 * TICK_HZ;
+  const streak = g.log.filter(scored).length;
+  if (scored(k) && streak >= 2) return streak >= 3 ? "TRIPLE KO!" : "DOUBLE KO!";
+  if (k.back) return "COMEBACK!";
+  const standing = g.players.filter((p) => p.alive).length;
+  if (!g.opts.teams && g.opts.mode !== HARVEST && g.players.length > 2 && standing === 2) return "FINAL TWO!";
+  return KO_CALLS[k.how] ?? (g.log.length === 1 ? "FIRST KO!" : "");
+}
+
+let lastCall = "";
+function showCallout(g: Game) {
+  const call = tl && prefs.callout ? callout(g) : "";
+  if (call === lastCall) return;
+  lastCall = call;
+  const el = $("callout");
+  el.textContent = call;
+  el.classList.remove("pop");
+  if (!call) return;
+  void el.offsetWidth; // restart the pop animation
+  el.classList.add("pop");
+  sfx.announce();
+}
+
 // ---------- name tags: page text over the canvas, so they stay crisp at any size ----------
 const PX = TILE / 16;
 function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
@@ -435,10 +515,11 @@ function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
   [...box.children].forEach((el, i) => {
     const tag = el as HTMLElement;
     const p = players[i];
-    tag.hidden = !p || !(p.alive || p.ghost);
+    tag.hidden = !p || !(p.alive || p.ghost) || (g!.map === NIGHT && me >= 0 && i !== me); // Night Farm: tags would give them away
     if (tag.hidden) return;
     const d = drift[i] ?? { x: 0, y: 0 };
-    const [text, cls] = [nameOf(i), `p${seats()[i] + 1}${p.alive ? "" : " ghost"}`];
+    const potato = p.potato ? ` · ${Math.ceil(p.potato / TICK_HZ)}s` : "";
+    const [text, cls] = [nameOf(i) + potato, `p${seats()[i] + 1}${p.alive ? "" : " ghost"}`];
     if (tag.textContent !== text) tag.textContent = text;
     if (tag.className !== cls) tag.className = cls;
     tag.style.left = `${((p.x + d.x) / PX / (COLS * 16)) * 100}%`;
@@ -464,6 +545,11 @@ function scoreCard(g: Game, i: number, inPlay: boolean) {
   pips.setAttribute("aria-label", `${wins} of ${g.opts.winRounds} round wins`);
   for (let k = 0; k < g.opts.winRounds; k++) pips.append(Object.assign(document.createElement("i"), { className: k < wins ? "won" : "" }));
   card.append(face, who, pips);
+  if (g.opts.mode === HARVEST) {
+    const crops = Object.assign(document.createElement("span"), { className: "crops", textContent: String(g.players[i].crops) });
+    crops.prepend(Object.assign(new Image(), { src: CROP_ICON, alt: "crops:" }));
+    card.append(crops);
+  }
   return card;
 }
 
@@ -485,7 +571,7 @@ function hud() {
   if (roomFull) [title, sub] = ["This room is full", "Open the page without ?room= to start your own."];
   else if (!connected) [title, sub] = [lobby ? "Connection lost" : "Connecting…", lobby ? "Reconnecting…" : "The server may take a minute to wake up."];
   else if (inLobby || !tl) title = "";
-  else if (g.phase === "ready") [title, sub] = [`Round ${g.round}: ${MAPS[g.map]}`, "Ready…"];
+  else if (g.phase === "ready") [title, sub] = [`Round ${g.round}: ${MAPS[g.map]}`, MODE_HINTS[g.opts.mode] ?? "Ready…"];
   else if (g.phase === "result") title = g.roundWinner < 0 ? "Draw!" : won(g.roundWinner, "round");
   else if (g.phase === "over") [title, sub] = [won(g.matchWinner, "match"), "Back to the lobby in a moment…"];
   if (tl && g.phase === "over") lastAwards = awards(g.players.map((p, i) => ({ name: nameOf(i), stats: p.stats })));
@@ -496,14 +582,20 @@ function hud() {
         ? "GO!"
         : performance.now() < backUntil
           ? "You're back in!"
+          : performance.now() < closeUntil
+          ? "Close call!"
+          : you?.potato
+          ? `You have the potato! Touch someone (${Math.ceil(you.potato / TICK_HZ)}s)`
           : you?.curse
-          ? `Cursed: ${CURSES[you.curse]} (${Math.ceil(you.curseLeft / TICK_HZ)}s). Touch someone to pass it on!`
+          ? you.curse === ROBBED
+            ? "Robbed! You lost every power-up"
+            : `Cursed: ${CURSES[you.curse]} (${Math.ceil(you.curseLeft / TICK_HZ)}s). Touch someone to pass it on!`
           : you?.ghost
             ? "Ghost: run along the wall, Space lobs an orb in"
             : hurry && g.roundTick < limit + 3 * TICK_HZ
               ? "Hurry! The walls are closing in"
               : "";
-  const score = g.players.map((p, i) => `${seats()[i]}:${nameOf(i)}:${p.wins}:${p.alive || g.phase === "ready"}`).join(",");
+  const score = g.players.map((p, i) => `${seats()[i]}:${nameOf(i)}:${p.wins}:${p.alive || g.phase === "ready"}:${p.crops}`).join(",");
 
   const shownAwards = tl && g.phase === "over" ? lastAwards : [];
   const key = [score, g.opts.winRounds, timer, title, sub, toast, inLobby, connected, me, shownAwards].join("|");
@@ -559,10 +651,12 @@ function frame(now: number) {
     }
   }
   music(volume.music > 0); // lobby too, once the browser has allowed audio
-  render(ctx, shown, seats(), tl?.drift);
+  render(ctx, shown, seats(), tl?.drift, me);
   nameTags(tl && !(lobby && !lobby.playing) ? shown : null, tl?.drift);
   hud();
   showLog(shown);
+  showFeed(shown);
+  showCallout(shown);
   requestAnimationFrame(frame);
 }
 

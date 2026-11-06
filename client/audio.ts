@@ -109,6 +109,8 @@ export const sfx = {
   whoosh: () => hiss(0.3, 0.5, 300, 4000),
   win: () => notes([[523, 0.1], [659, 0.1], [784, 0.1], [1047, 0.35]], "square", 0.2),
   lose: () => notes([[392, 0.15], [330, 0.15], [262, 0.4]], "triangle", 0.3),
+  announce: () => notes([[784, 0.07], [1047, 0.07], [1568, 0.2]], "square", 0.18),
+  rumble: () => tone(55, 1.2, "sawtooth", 0.25, 80), // a tractor's on its way
 };
 
 // ---------- music: a 4-bar loop in A minor, 16 steps per bar ----------

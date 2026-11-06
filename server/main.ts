@@ -7,7 +7,7 @@ import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { botInput } from "../shared/bot.ts";
 import { InputQueue } from "../shared/netcode.ts";
-import { ALL_ITEMS, MAPS, ROUND_CHOICES, TICK_HZ, createGame, freshStats, sideOf, tickGame, type Game, type Stats } from "../shared/sim.ts";
+import { ALL_ITEMS, MAPS, MODES, ROUND_CHOICES, TICK_HZ, createGame, freshStats, sideOf, tickGame, type Game, type Stats } from "../shared/sim.ts";
 
 const PORT = Number(process.env.PORT) || 8000;
 const SEATS = 4;
@@ -56,8 +56,9 @@ interface Settings {
   shrink: boolean;
   revenge: boolean;
   items: number; // power-ups that can drop, as a bitmask by item id
+  mode: number; // index into MODES: Classic, Harvest, Hot Potato
 }
-const DEFAULT_SETTINGS: Settings = { map: -1, teams: false, winRounds: 2, roundSecs: 120, shrink: true, revenge: true, items: ALL_ITEMS };
+const DEFAULT_SETTINGS: Settings = { map: -1, teams: false, winRounds: 2, roundSecs: 120, shrink: true, revenge: true, items: ALL_ITEMS, mode: 0 };
 interface Room {
   code: string;
   clients: Client[];
@@ -233,11 +234,12 @@ function handle(room: Room, c: Client, m: Record<string, unknown>) {
     room.bots = m.on === true;
     sendLobby(room);
   } else if (m.type === "settings") {
-    const { map, teams, winRounds, roundSecs, shrink, revenge, items } = m;
+    const { map, teams, winRounds, roundSecs, shrink, revenge, items, mode = 0 } = m; // settings saved before modes existed have no mode
     if (!Number.isInteger(map) || (map as number) < -1 || (map as number) >= MAPS.length) return;
     if (!Number.isInteger(winRounds) || (winRounds as number) < 1 || (winRounds as number) > 5) return;
     if (!ROUND_CHOICES.includes(roundSecs as number)) return;
     if (!Number.isInteger(items) || ((items as number) & ~ALL_ITEMS) !== 0) return;
+    if (!Number.isInteger(mode) || (mode as number) < 0 || (mode as number) >= MODES.length) return;
     room.settings = {
       map: map as number,
       teams: teams === true,
@@ -246,6 +248,7 @@ function handle(room: Room, c: Client, m: Record<string, unknown>) {
       shrink: shrink === true,
       revenge: revenge === true,
       items: items as number,
+      mode: mode as number,
     };
     sendLobby(room);
   }

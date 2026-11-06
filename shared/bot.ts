@@ -1,8 +1,8 @@
 // Bot players. A bot only produces input bits, like a keyboard, so it needn't be deterministic:
 // the server runs bots and sends their inputs to everyone like any other player's.
 import {
-  ACT, BLOCK, BOMB, COLS, DOWN, FLOOR, LEFT, RIGHT, ROWS, SPIRAL, TICK_HZ, TILE, UP, WALL, ghostReady, roundTicks, sideOf, tileAt,
-  type Game,
+  ACT, BLOCK, BOMB, COLS, DOWN, FLOOR, LANES, LEFT, RIGHT, ROWS, SPIRAL, TICK_HZ, TILE, UP, WALL, ghostReady, roundTicks, sideOf, tileAt,
+  tractor, type Game,
 } from "./sim.ts";
 
 const STEPS = [-COLS, COLS, -1, 1]; // tile-index offsets for up, down, left, right (input bits 1, 2, 4, 8)
@@ -24,11 +24,20 @@ function blast(g: Game, from: number, range: number, bombs: Set<number>, out: Ui
   }
 }
 
-function dangerMap(g: Game, bombs: Set<number>) {
+function dangerMap(g: Game, id: number, bombs: Set<number>) {
   const d = new Uint8Array(g.grid.length);
   g.fire.forEach((f, i) => f && (d[i] = 1));
   for (const b of g.bombs) blast(g, tileAt(b.x, b.y), b.range, bombs, d, b.pierce);
   if (g.opts.shrink && g.roundTick >= roundTicks(g) - TICK_HZ) for (const i of SPIRAL.slice(g.shrink, g.shrink + 15)) d[i] = 1;
+  LANES.forEach(([row], k) => {
+    const t = tractor(g, k);
+    if (t.warn || t.x !== null) for (let c = 0; c < COLS; c++) d[row * COLS + c] = 1; // keep off the road while a tractor's coming
+  });
+  g.players.forEach((q, j) => {
+    if (j === id || !q.alive || !q.potato) return;
+    const i = tileAt(q.x, q.y);
+    for (const k of [i, ...STEPS.map((s) => i + s)]) d[k] = 1; // stay out of the potato holder's reach
+  });
   return d;
 }
 
@@ -92,11 +101,18 @@ export function botInput(g: Game, id: number): number {
   if (!p.alive) return p.ghost ? haunt(g, id) : 0;
   const here = tileAt(p.x, p.y);
   const bombs = new Set(g.bombs.map((b) => tileAt(b.x, b.y)));
-  const danger = dangerMap(g, bombs);
+  const danger = dangerMap(g, id, bombs);
   const blocked = (i: number) => g.grid[i] !== FLOOR || g.fire[i] > 0 || bombs.has(i);
   const go = (to: number) => (to < 0 ? 0 : 1 << STEPS.indexOf(to - here));
 
   if (danger[here]) return go(firstStep(here, blocked, (i) => !danger[i]));
+
+  if (p.potato) {
+    // Holding the potato: go and hand it to someone.
+    const others = new Set(g.players.flatMap((q, j) => (j !== id && q.alive ? [tileAt(q.x, q.y)] : [])));
+    const to = firstStep(here, blocked, (i) => others.has(i));
+    if (to >= 0) return go(to);
+  }
 
   const mine = g.bombs.filter((b) => b.owner === id);
   if (mine.some((b) => b.remote) && !(p.prev & ACT)) return ACT; // we're out of every blast, so fire away
