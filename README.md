@@ -1,33 +1,33 @@
 # Boom Orbs
 
-A 4-player online bomb-maze brawl set in the Critter Catch world, made for playing with friends in the browser. Drop orbs, break bushes, grab power-ups, and be the last trainer standing. At 0:00 the walls close in.
+A 4-player online bomb-maze brawl on the farm, made for playing with friends in the browser. Drop orbs, break crates, grab power-ups, and be the last farmer standing. At 0:00 the walls close in.
 
 **Status: milestone 4.** It's online, with invite links, a lobby and rollback netcode; bots fill empty seats. It has sound, music and gamepad support, and keeps score for the evening.
 
 - **Maps:** Meadow; Ice Rink (you slide until you hit something); Factory (conveyor belts); Portal Garden (two linked pairs); Night Farm (you only see what your lantern, fire and lit orbs light up); Tractor Lane (two roads; arrows flash, then a tractor drives through and flattens whoever, and whatever orb, is in the way). Pick one in the lobby, or Random for a new map each round.
 - **Games:**
   - Classic: last one standing.
-  - Harvest: broken bushes drop carrots. A knockout spills half of yours and you're back at your corner 2 s later; most carrots at 0:00 wins.
-  - Hot Potato: someone gets the potato at Go. Touch someone to pass it on before its 15 s run out.
+  - Harvest: broken crates drop carrots. A knockout spills half of yours and you're back at your corner 2 s later; most carrots at 0:00 wins. Whoever is 3 or more ahead wears the crown.
+  - Hot Potato: someone gets the potato at Go. Touch someone to pass it on before its 15 s run out; it ticks for the last 3 s. If it goes off on someone you passed it to, the knockout is yours ("Pema cooked Bot 2"), unless they're your teammate. It glows on Night Farm.
 - **Teams:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
-- **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one throw every 8 seconds; an orb over a ghost's head means it's ready). If your orb knocks out an opponent, you're back in their place, once per round: get knocked out again and you're out until the next round.
+- **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one throw every 8 seconds; an orb over a ghost's head means it's ready). If your orb knocks out an opponent, you're back in their place, once per round. Get knocked out again and you're a spite ghost: back on the wall, and your orbs still knock people out and score, but they can't bring you back. Ghosts see everyone on Night Farm.
 - **Rounds:** 1:30 by default, then sudden death: the walls close in, three a second.
 - **Power-ups** (Skull, Swap and Gust are rare drops, so luck decides less):
   - Orb+, Fire+, Speed+, Kick, Shield, Remote
-  - Pierce: blasts go through bushes
+  - Pierce: blasts go through crates
   - Napalm: your fire burns for 2 s
   - Skull: a random 10 s curse: reversed, sluggish, butterfingers (orbs drop by themselves, and Remote and Glove stop working) or fizzle, all passed on by touch; or robbed (you lose every power-up, and it can't be passed on)
   - Glove: pick up an orb and carry it overhead (its fuse waits), then throw it over walls the way you face; it wraps around the edge
   - Swap: trade places with a random opponent
   - Frost: your blasts leave ice for 5 s
   - Gust: every orb on the ground slides off the way you face
-- **Awards** after each match: most knockouts, comeback kid, hot potato, bush whacker, collector, top farmer, trigger happy, and "Oops!" for knocking yourself out. Name tags above every trainer show who's who.
+- **Awards** after each match: most knockouts, comeback kid, bad apple (curses and potatoes passed on), crate cracker, collector, carrot top, trigger happy, and "Oops!" for knocking yourself out. Name tags above every farmer show who's who.
 - **Feel:**
   - Sound effects and an original chiptune loop, synthesised in the browser (no audio files), with Sound and Music toggles.
   - Gamepads work.
   - Rollback corrections glide instead of snapping.
   - The lobby shows match wins for the evening.
-  - Kill feed, "Close call!" when someone's blast just misses you, and an announcer (DOUBLE KO!, COMEBACK!, FINAL TWO!, OOPS!...). Each player switches these on or off for their own screen, next to the volume sliders.
+  - KO feed, "Close call!" when someone's blast just misses you, and an announcer (DOUBLE KO!, COMEBACK!, FINAL TWO!, OOPS!...). Each player switches these on or off for their own screen, next to the volume sliders.
 - **Everything is switchable:** the Game and Map pickers, a checkbox per power-up (the Skull covers every curse), and the room rules.
 
 ## Run it

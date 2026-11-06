@@ -2,7 +2,7 @@
   "name": "boom-orbs",
   "private": true,
   "version": "0.1.0",
-  "description": "4-player online bomb-maze brawl set in the Critter Catch world",
+  "description": "4-player online bomb-maze brawl on the farm, for playing with friends in the browser",
   "type": "module",
   "engines": {
     "node": ">=20"

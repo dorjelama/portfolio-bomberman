@@ -3,7 +3,7 @@
 // The server is the clock: it simulates tick t with whatever inputs it has for t, and broadcasts them.
 // Clients run a little ahead of it, guess everyone else's input (same as last confirmed),
 // and rewind + replay when the confirmed inputs turn out different.
-import { TILE, tickGame, type Game } from "./sim.ts";
+import { INPUT_BITS, TILE, tickGame, type Game } from "./sim.ts";
 
 const MAX_LEAD = 120; // server ignores inputs stamped more than 2 s ahead
 
@@ -18,7 +18,7 @@ export class InputQueue {
     if (!Number.isInteger(t) || !Number.isInteger(input) || t > now + MAX_LEAD) return;
     // A late input lands on the next open tick. Keep them in order so a quick tap (press, release) is never lost.
     const at = Math.max(t, now + 1, this.lastAssigned + 1);
-    this.q.set(at, input & 63);
+    this.q.set(at, input & INPUT_BITS);
     this.lastAssigned = at;
   }
 

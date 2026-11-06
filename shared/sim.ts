@@ -39,6 +39,14 @@ export const LEFT = 4;
 export const RIGHT = 8;
 export const BOMB = 16;
 export const ACT = 32; // detonate (Remote)
+// Cheats (a room rule, off by default): a tap puts a cheat id in bits 6..10 for one tick. Ids up to GUST hand you
+// that power-up, as if you'd walked over it; then these three.
+export const CHEAT_SHIFT = 6;
+export const INPUT_BITS = (1 << 11) - 1; // everything an input can hold
+export const MAX_OUT = 14; // orbs, fire and speed to the top
+export const GOD = 15; // toggle: blasts and tractors can't touch you (walls and the potato still can, so rounds still end)
+export const CURE = 16; // lifts your curse (what Robbed took stays gone)
+export const cheatOf = (input: number) => (input >> CHEAT_SHIFT) & 31;
 export const DX = [0, 0, -1, 1];
 export const DY = [-1, 1, 0, 0];
 
@@ -86,7 +94,7 @@ export const CROP = 14; // Harvest mode only: not a power-up, so it has no weigh
 // By item id. The luck-driven ones (Skull, Swap, Gust) are kept rare, so the better player usually wins.
 const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 4, 6, 2, 6, 3];
 export const FROST_TICKS = 5 * TICK_HZ; // how long Frost ice lasts
-const CROP_CHANCE = 0.5; // Harvest: a broken bush drops a crop this often, else the usual power-up roll
+const CROP_CHANCE = 0.5; // Harvest: a broken crate drops a crop this often, else the usual power-up roll
 export const RESPAWN_TICKS = 2 * TICK_HZ; // Harvest: from a knockout back to your corner
 export const POTATO_TICKS = 15 * TICK_HZ;
 
@@ -119,9 +127,11 @@ export interface Options {
   revenge: boolean; // knocked-out players come back as ghosts on the rim
   items: number; // which power-ups can drop: bit (1 << item id)
   mode: number; // index into MODES
+  cheats: boolean; // players can use cheats (see CHEAT_SHIFT)
 }
 
-// One knockout, for the match summary. by = who lit the fire (-1 for walls, potatoes and tractors); back = their ghost came back in.
+// One knockout, for the match summary. by = who lit the fire, or who passed the potato to an opponent last
+// (-1 for walls, tractors and a potato nobody passed); back = their ghost came back in.
 export interface Knockout {
   tick: number;
   round: number;
@@ -141,8 +151,9 @@ export interface Stats {
   comebacks: number;
   orbs: number; // dropped or thrown
   crops: number; // picked up, in Harvest
+  cheats: number; // cheats used
 }
-export const freshStats = (): Stats => ({ kos: 0, oops: 0, bushes: 0, pickups: 0, curses: 0, comebacks: 0, orbs: 0, crops: 0 });
+export const freshStats = (): Stats => ({ kos: 0, oops: 0, bushes: 0, pickups: 0, curses: 0, comebacks: 0, orbs: 0, crops: 0, cheats: 0 });
 
 export interface Player {
   x: number;
@@ -153,7 +164,7 @@ export interface Player {
   alive: boolean;
   diedAt: number;
   ghost: boolean; // knocked out and riding the rim
-  returned: boolean; // came back from the rim this round: the next knockout is for good
+  returned: boolean; // came back from the rim this round: as a ghost again (a spite ghost), your orbs still score but can't bring you back
   bombs: number;
   range: number;
   speed: number;
@@ -164,8 +175,10 @@ export interface Player {
   napalm: boolean;
   glove: boolean;
   frost: boolean;
+  god: boolean; // cheat: blasts and tractors can't touch you
   crops: number; // Harvest: held right now
   potato: number; // Hot Potato: ticks until it goes off, 0 = not holding it
+  passer: number; // Hot Potato: who handed it to you, -1 = it was handed out fresh
   carry: number; // id of the orb held overhead, 0 = none
   threwAt: number; // tick of the last throw, for the throwing pose
   invuln: number;
@@ -292,8 +305,10 @@ function freshPlayer(id: number): Player {
     napalm: false,
     glove: false,
     frost: false,
+    god: false,
     crops: 0,
     potato: 0,
+    passer: -1,
     carry: 0,
     threwAt: -TICK_HZ,
     invuln: 0,
@@ -313,7 +328,7 @@ export function createGame(players: number, seed: number, opts: Partial<Options>
     seed: seed | 0,
     opts: {
       map: 0, winRounds: WIN_ROUNDS, teams: null, rematch: true,
-      roundSecs: ROUND_TICKS / TICK_HZ, shrink: true, revenge: true, items: ALL_ITEMS, mode: CLASSIC,
+      roundSecs: ROUND_TICKS / TICK_HZ, shrink: true, revenge: true, items: ALL_ITEMS, mode: CLASSIC, cheats: false,
       ...opts,
     },
     map: 0,
@@ -422,7 +437,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     if (p.alive) control(g, id, p, input);
     else if (p.ghost) haunt(g, id, p, input);
     else if (g.opts.mode === HARVEST && g.tick - p.diedAt >= RESPAWN_TICKS) respawn(g, id);
-    else if (g.opts.revenge && !p.returned && g.tick - p.diedAt >= GHOST_DELAY) toRim(p); // one comeback a round
+    else if (g.opts.revenge && g.tick - p.diedAt >= GHOST_DELAY) toRim(p); // every time: after a comeback, as a spite ghost
     p.prev = input;
   }
   passCurses(g);
@@ -457,7 +472,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     if (g.grid[i] === WALL) {
       kill(g, id);
       logKo(g, id, -1, "wall");
-    } else if ((g.fire[i] || flattened) && !p.invuln) {
+    } else if ((g.fire[i] || flattened) && !p.invuln && !p.god) {
       if (p.shield) [p.shield, p.invuln] = [false, INVULN];
       else if (g.fire[i]) knockedOut(g, id, i);
       else {
@@ -485,7 +500,8 @@ export function tickGame(g: Game, inputs: readonly number[]) {
   } else [g.phase, g.phaseLeft] = ["result", RESULT_TICKS];
 }
 
-// Caught in fire on tile i: credit whoever lit it, and a ghost whose orb did it comes back in their place.
+// Caught in fire on tile i: credit whoever lit it, and a ghost whose orb did it comes back in their place,
+// once a round. A spite ghost (already came back once) scores the KO but stays on the rim.
 function knockedOut(g: Game, id: number, i: number) {
   kill(g, id);
   const by = g.fireBy[i];
@@ -495,7 +511,7 @@ function knockedOut(g: Game, id: number, i: number) {
   if (by < 0 || by === id || team) return;
   const killer = g.players[by];
   killer.stats.kos++;
-  if (!g.fireRevenge[i] || !killer.ghost) return;
+  if (!g.fireRevenge[i] || !killer.ghost || killer.returned) return;
   const { wins, stats, prev } = killer;
   const spot = { x: center(i % COLS), y: center(Math.floor(i / COLS)) };
   Object.assign(killer, freshPlayer(by), spot, { invuln: INVULN, returned: true, wins, stats, prev });
@@ -524,7 +540,8 @@ function kill(g: Game, id: number) {
     p.crops -= lost;
     spill(g, t, lost);
   }
-  if (potato) givePotato(g);
+  const sides = new Set(g.players.flatMap((q, j) => (q.alive ? [sideOf(g, j)] : [])));
+  if (potato && sides.size > 1) givePotato(g); // a fresh one, unless that ended the round: the winner doesn't hold it on the win screen
 }
 
 // Harvest: a knocked-out player's crops land on the nearest free ground, for anyone to grab.
@@ -553,7 +570,7 @@ function cropLeader(g: Game) {
 function givePotato(g: Game) {
   const standing = g.players.filter((p) => p.alive);
   const p = standing[Math.floor(rand(g) * standing.length)];
-  if (p) p.potato = POTATO_TICKS;
+  if (p) [p.potato, p.passer] = [POTATO_TICKS, -1];
 }
 
 // Revenge mode: after a knockout you reappear on the nearest stretch of the outer wall.
@@ -591,13 +608,18 @@ const flip = (v: number) => (v & ~15) | ((v & UP) << 1) | ((v & DOWN) >> 1) | ((
 
 function control(g: Game, id: number, p: Player, raw: number) {
   if (p.potato === 1) {
+    // Whoever passed it to you scores the KO, unless they're on your team.
+    const by = p.passer >= 0 && sideOf(g, p.passer) !== sideOf(g, id) ? p.passer : -1;
     kill(g, id); // kill() hands a fresh potato to someone else
-    logKo(g, id, -1, "potato");
+    logKo(g, id, by, "potato");
+    if (by >= 0) g.players[by].stats.kos++;
     return;
   }
   if (p.potato) p.potato--;
   if (p.curseLeft && --p.curseLeft === 0) p.curse = 0;
   if (p.immune) p.immune--;
+  const cheat = g.opts.cheats ? cheatOf(raw) : 0;
+  if (cheat && cheat !== cheatOf(p.prev)) useCheat(g, id, p, cheat); // once per tap
   const input = p.curse === REVERSED ? flip(raw) : raw;
   const fumble = p.curse === BUTTERFINGERS; // orbs drop by themselves, and the button does nothing
   const act = fumble ? 0 : raw & ACT;
@@ -688,7 +710,7 @@ function steer(g: Game, p: Player, input: number, speed: number, rim: boolean) {
 
 // Whoever carries a curse (or the potato) hands it to the first player they touch.
 function passCurses(g: Game) {
-  for (const a of g.players) {
+  for (const [id, a] of g.players.entries()) {
     if (!a.alive || (!a.curse && !a.potato)) continue;
     const t = tileAt(a.x, a.y);
     const touching = (q: Player) => q !== a && q.alive && !q.immune && tileAt(q.x, q.y) === t;
@@ -700,7 +722,7 @@ function passCurses(g: Game) {
     }
     const c = a.potato ? g.players.find(touching) : undefined;
     if (c) {
-      [c.potato, a.potato, a.immune] = [a.potato, 0, IMMUNE_TICKS]; // the clock keeps running
+      [c.potato, c.passer, a.potato, a.immune] = [a.potato, id, 0, IMMUNE_TICKS]; // the clock keeps running
       a.stats.curses++;
     }
   }
@@ -712,6 +734,15 @@ function catchCurse(p: Player, curse: number, left: number) {
   if (curse !== ROBBED) return;
   const { bombs, range, speed, kick, remote, shield, pierce, napalm, glove, frost } = freshPlayer(0);
   Object.assign(p, { bombs, range, speed, kick, remote, shield, pierce, napalm, glove, frost });
+}
+
+function useCheat(g: Game, id: number, p: Player, cheat: number) {
+  if (cheat <= GUST) pickUp(g, id, p, cheat);
+  else if (cheat === MAX_OUT) [p.bombs, p.range, p.speed] = [MAX_BOMBS, MAX_RANGE, SPEEDS.length - 1];
+  else if (cheat === GOD) p.god = !p.god;
+  else if (cheat === CURE) [p.curse, p.curseLeft] = [0, 0];
+  else return;
+  p.stats.cheats++;
 }
 
 function pickUp(g: Game, id: number, p: Player, item: number) {

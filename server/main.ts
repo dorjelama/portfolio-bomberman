@@ -57,8 +57,9 @@ interface Settings {
   revenge: boolean;
   items: number; // power-ups that can drop, as a bitmask by item id
   mode: number; // index into MODES: Classic, Harvest, Hot Potato
+  cheats: boolean;
 }
-const DEFAULT_SETTINGS: Settings = { map: -1, teams: false, winRounds: 2, roundSecs: 90, shrink: true, revenge: true, items: ALL_ITEMS, mode: 0 };
+const DEFAULT_SETTINGS: Settings = { map: -1, teams: false, winRounds: 2, roundSecs: 90, shrink: true, revenge: true, items: ALL_ITEMS, mode: 0, cheats: false };
 interface Room {
   code: string;
   clients: Client[];
@@ -76,19 +77,22 @@ const rooms = new Map<string, Room>();
 const wss = new WebSocketServer({ server, path: "/ws", maxPayload: 512 });
 
 const send = (c: Client, msg: unknown) => c.ws?.readyState === WebSocket.OPEN && c.ws.send(JSON.stringify(msg));
-const cleanName = (v: unknown) => (typeof v === "string" ? v.replace(/[^\p{L}\p{N} _.-]/gu, "").trim().slice(0, 12) : "") || "Trainer";
+const cleanName = (v: unknown) => (typeof v === "string" ? v.replace(/[^\p{L}\p{N} _.-]/gu, "").trim().slice(0, 12) : "") || "Farmer";
 const freeSeat = (room: Room) => [0, 1, 2, 3].find((s) => !room.clients.some((c) => c.seat === s)) ?? -1;
 const rosterIndex = (room: Room, c: Client) => room.roster.findIndex((r) => r.client === c);
 
 function sendLobby(room: Room) {
-  const leader = room.clients.find((x) => x.ws); // clients are in join order: whoever has been here longest wears the crown
+  // The crown is earned: the player with the most match wins tonight, on their own. Nobody before the first win,
+  // on a tie, or while the bots lead.
+  const ranked = [...room.tally].sort(([, a], [, b]) => b.wins - a.wins);
+  const champ = ranked[0] && ranked[0][1].wins > (ranked[1]?.[1].wins ?? 0) ? ranked[0][0] : "";
   for (const c of room.clients) {
     send(c, {
       type: "lobby",
       code: room.code,
       seats: [0, 1, 2, 3].map((s) => {
         const o = room.clients.find((x) => x.seat === s);
-        return o ? { name: o.name, ready: o.ready, you: o === c, leader: o === leader } : null;
+        return o ? { name: o.name, ready: o.ready, you: o === c, champ: !!champ && o.token === champ } : null;
       }),
       bots: room.bots,
       settings: room.settings,
@@ -235,7 +239,7 @@ function handle(room: Room, c: Client, m: Record<string, unknown>) {
     room.bots = m.on === true;
     sendLobby(room);
   } else if (m.type === "settings") {
-    const { map, teams, winRounds, roundSecs, shrink, revenge, items, mode = 0 } = m; // settings saved before modes existed have no mode
+    const { map, teams, winRounds, roundSecs, shrink, revenge, items, mode = 0, cheats } = m; // settings saved before modes existed have no mode
     if (!Number.isInteger(map) || (map as number) < -1 || (map as number) >= MAPS.length) return;
     if (!Number.isInteger(winRounds) || (winRounds as number) < 1 || (winRounds as number) > 5) return;
     if (!ROUND_CHOICES.includes(roundSecs as number)) return;
@@ -250,6 +254,7 @@ function handle(room: Room, c: Client, m: Record<string, unknown>) {
       revenge: revenge === true,
       items: items as number,
       mode: mode as number,
+      cheats: cheats === true,
     };
     sendLobby(room);
   }

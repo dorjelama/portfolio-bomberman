@@ -9,7 +9,7 @@ import {
 
 const PX = TILE / 16; // sim units per screen pixel
 const OVERHEAD = 18; // px above a player's centre where a carried orb sits, on the hat
-export const CROWN_TOP = 20; // px above a player's centre where the room leader's crown starts (name tags go above it)
+export const CROWN_TOP = 20; // px above a player's centre where the crown starts (name tags go above it)
 
 const field = document.createElement("canvas");
 field.width = COLS * 16;
@@ -78,11 +78,26 @@ function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: n
   ctx.drawImage(TRAINERS[seat][p.dir][frame], x - 10, y - 16); // 20x20 farmer, feet 3 px below centre; the hat shows the colour
   if (crown) ctx.drawImage(CROWN_IMG, x - 5, y - CROWN_TOP); // the hat's top is 14 px up in every frame, so it sits flush
   ctx.globalAlpha = 1;
-  if (p.ghost && ghostReady(g, p)) drawOrb(ctx, { x: x * PX, y: (y - OVERHEAD) * PX, remote: false, fuse: FUSE }, t); // an orb overhead = ready to throw
-  if (p.curse && (t >> 3) % 2) ctx.drawImage(CURSE_MARK, x - 5, y - 27);
-  if (p.potato) ctx.drawImage(POTATO_IMG, x - 8, y - 34 - ((t >> (p.potato < 3 * TICK_HZ ? 1 : 3)) % 2)); // jiggles faster near the end
+  if (p.alive && p.god) {
+    // God mode (a cheat): a halo over the hat, so everyone can see who's cheating.
+    ctx.strokeStyle = "#ffd23f";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(x, Math.max(3, y - 18), 5, 1.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+  // Overhead marks are clamped to the canvas, or they'd vanish above anyone on the top row (and ghosts on the top rim).
+  if (p.ghost && ghostReady(g, p)) drawOrb(ctx, { x: x * PX, y: Math.max(7, y - OVERHEAD) * PX, remote: false, fuse: FUSE }, t); // an orb overhead = ready to throw
+  if (p.curse && (t >> 3) % 2) ctx.drawImage(CURSE_MARK, x - 5, Math.max(0, y - 27));
+  if (p.potato) {
+    const jig = (t >> (p.potato < 3 * TICK_HZ ? 1 : 3)) % 2; // jiggles faster near the end
+    // Over the name tag; on the top row there's no room, so it's held out beside the head instead.
+    if (y >= 34) ctx.drawImage(POTATO_IMG, x - 8, y - 34 - jig);
+    else ctx.drawImage(POTATO_IMG, x + 7, y - 20 - jig);
+  }
   if (p.shield) {
-    ctx.strokeStyle = "rgb(63 208 203 / 0.8)";
+    ctx.strokeStyle = "rgb(244 244 244 / 0.8)"; // white: seat colours only ever mean a player
     ctx.beginPath();
     ctx.arc(x, y - 6, 10.5, 0, Math.PI * 2);
     ctx.stroke();
@@ -90,6 +105,7 @@ function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: n
 }
 
 // Night Farm: everything outside the lights is dark. Only your own lantern is lit, so others lurk until a blast shows them.
+// Ghosts and watchers see everyone (a ghost has to aim), and the potato always glows.
 const dark = document.createElement("canvas");
 dark.width = COLS * 16;
 dark.height = ROWS * 16;
@@ -107,11 +123,13 @@ function night(ctx: CanvasRenderingContext2D, g: Game, me: number, nudge: { x: n
     d.fillRect(x - r, y - r, 2 * r, 2 * r);
   };
   const mine = g.players[me];
-  const lit = mine && (mine.alive || mine.ghost) ? [me] : g.players.map((_, i) => i); // watching, or just knocked out: see everyone
+  const lit = mine?.alive ? [me] : g.players.map((_, i) => i); // a ghost, watching, or just knocked out: see everyone
+  const at = (i: number) => [(g.players[i].x + (nudge[i]?.x ?? 0)) / PX, (g.players[i].y + (nudge[i]?.y ?? 0)) / PX] as const;
   for (const i of lit) {
     const p = g.players[i];
-    if (p.alive || p.ghost) light((p.x + (nudge[i]?.x ?? 0)) / PX, (p.y + (nudge[i]?.y ?? 0)) / PX - 4, 40);
+    if (p.alive || p.ghost) light(at(i)[0], at(i)[1] - 4, 40);
   }
+  g.players.forEach((p, i) => p.alive && p.potato && light(at(i)[0], at(i)[1] - 12, 28)); // you can always see who has it
   g.fire.forEach((f, i) => f && light((i % COLS) * 16 + 8, Math.floor(i / COLS) * 16 + 8, 24));
   for (const b of g.bombs) light(b.x / PX, b.y / PX, 12 + ((g.tick >> 3) % 2) * 2); // the fuse sparks
   ctx.drawImage(dark, 0, 0);
@@ -143,8 +161,8 @@ function tractors(ctx: CanvasRenderingContext2D, g: Game) {
 }
 
 // nudge[i]: extra offset for player i, easing out a rollback correction. me: whose lantern lights Night Farm.
-// leader: the player wearing the room leader's crown, if any.
-export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], nudge: { x: number; y: number }[] = [], me = -1, leader = -1) {
+// crowned: the player wearing the crown (Harvest's carrot leader), if any.
+export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], nudge: { x: number; y: number }[] = [], me = -1, crowned = -1) {
   const t = g.tick;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(field, 0, 0);
@@ -190,7 +208,7 @@ export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], 
       }
     }
     for (const b of g.bombs) if (!b.hops && Math.floor(b.y / TILE) === r) drawOrb(ctx, b, t);
-    for (const id of byY) if (Math.floor(g.players[id].y / TILE) === r) drawTrainer(ctx, g, id, seats[id] ?? id, nudge[id], id === leader);
+    for (const id of byY) if (Math.floor(g.players[id].y / TILE) === r) drawTrainer(ctx, g, id, seats[id] ?? id, nudge[id], id === crowned);
   }
   // Carried orbs sit on the hat; thrown ones leave from there in an arc over everything (shadow on the ground),
   // landing a tile short, then a last hop. Bounces off taken tiles are that same small hop.

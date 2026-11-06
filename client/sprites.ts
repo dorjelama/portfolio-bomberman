@@ -9,29 +9,21 @@ import treesUrl from "./art/harvest-trees.png";
 import ranchUrl from "./art/ranch-objects.png";
 import potatoUrl from "./art/ranch-potato.png";
 
+// No seat colours (teal, pink-red, green, purple) in here: those only ever mean a player.
 const PALETTE: Record<string, string> = {
   k: "#1b1b2f", // outline
-  n: "#2b2f77", // beanie
-  N: "#4a52b3", // beanie cuff
+  n: "#2b2f77", // orb navy
+  N: "#4a52b3", // orb shine
   w: "#ffffff",
-  h: "#1a1a1a", // hair
-  s: "#f2c29b", // skin
-  S: "#d99b73",
-  e: "#1a1a1a", // eyes
-  t: "#1f9e9a", // scarf
-  o: "#e0a43a", // scarf stripe
-  j: "#2a2a2a", // jacket
-  b: "#4a3424", // trousers / boots
-  R: "#a3a9b0", // Pebblet
-  r: "#6b7177",
-  P: "#f4a7c4", // Fluffin
-  p: "#d9739c",
-  Y: "#ffd23f", // Zappik
-  y: "#d99a1e",
-  c: "#ff6b4a",
-  g: "#5aa83e", // bush
-  G: "#8fd468",
-  d: "#3d7f2c",
+  o: "#e0a43a", // flame orange
+  b: "#4a3424", // wood, leather, the fuse
+  R: "#a3a9b0", // steel
+  r: "#6b7177", // steel, shaded
+  P: "#f4a7c4", // portal pink
+  p: "#d9739c", // portal pink, shaded
+  Y: "#ffd23f", // spark yellow (the page's accent)
+  y: "#d99a1e", // spark, shaded
+  c: "#ff6b4a", // fire (the blast's outer flame)
   B: "#9fd0e6", // frost
 };
 // ---------- new art for Boom Orbs ----------
@@ -58,13 +50,13 @@ const ICONS = [
   ["....k.....", "...kck....", "...kcck...", "..kccock..", ".kcooYock.", ".kcoYYYock", "kcoYYwYYok", "kcoYwwwYok", ".kcoYYYok.", "..kkkkkk.."],
   [".....kkkk.", "....kYYk..", "...kYYk...", "..kYYk....", ".kYYYYYYk.", ".kkkYYYk..", "...kYYk...", "..kYYk....", ".kYk......", ".kk......."],
   ["..kkkk....", "..kbbk....", "..kbbk....", "..kbbk....", "..kbbbk...", "..kbbbbkk.", ".kobbbbbbk", ".kbbbbbbbk", ".kkkkkkkkk", ".........."],
-  ["kkkkkkkkkk", "kwtttotttk", "kttttotttk", "ktoooooook", "kttttotttk", ".ktttottk.", ".ktttottk.", "..kttttk..", "...kttk...", "....kk...."],
+  ["kkkkkkkkkk", "kwRRRrRRRk", "kRRRRrRRRk", "kRrrrrrrrk", "kRRRRrRRRk", ".kRRRrRRk.", ".kRRRrRRk.", "..kRRRRk..", "...kRRk...", "....kk...."],
   ["......kYk.", ".......k..", "..kkkkkkk.", "..kRRRRRk.", "..kRcccRk.", "..kRcwcRk.", "..kRcccRk.", "..kRRRRRk.", "..krRrRrk.", "..kkkkkkk."],
   ["....k.....", "....kk....", "....kck...", "kkkkkcck..", "kccccccck.", "kccccccck.", "kkkkkcck..", "....kck...", "....kk....", "....k....."],
   ["....kk....", "...kcck...", "...kcck...", "..kccock..", ".kccoocck.", ".kcooYock.", ".kcoYYock.", ".kccoocck.", "..kcccck..", "...kkkk..."],
   ["..kkkkkk..", ".kwwwwwwk.", "kwwwwwwwwk", "kwkkwwkkwk", "kwkkwwkkwk", "kwwwwkwwwk", ".kwwwwwwk.", "..kwkwkwk.", "..kkkkkkk.", ".........."],
   ["..k.k.k...", ".kwkwkwk..", ".kwkwkwk..", ".kwwwwwwk.", "kkwwwwwwk.", "kwkwwwwwk.", ".kwwwwwwk.", "..kwwwwk..", "..kRRRRk..", "..kkkkkk.."],
-  ["......k...", "kkkkkkYk..", "kYYYYYYYk.", "kkkkkkYk..", "......k...", "...k......", "..ktkkkkkk", ".ktttttttk", "..ktkkkkkk", "...k......"],
+  ["......k...", "kkkkkkYk..", "kYYYYYYYk.", "kkkkkkYk..", "......k...", "...k......", "..kwkkkkkk", ".kwwwwwwwk", "..kwkkkkkk", "...k......"],
   ["....kk....", ".k.kBBk.k.", "kBkkwwkkBk", ".kBBwwBBk.", "kkwwwwwwkk", "kkwwwwwwkk", ".kBBwwBBk.", "kBkkwwkkBk", ".k.kBBk.k.", "....kk...."],
   ["......kkk.", ".....kBBBk", "kkkkkkkkBk", "BBBBBBBBBk", "kkkkkkkkk.", "..kkkkkkk.", "..BBBBBBBk", "..kkkkkkBk", "......kBk.", ".......k.."],
 ];
@@ -145,7 +137,7 @@ const PORTAL_TILE = [
   "................",
 ];
 
-// The room leader's crown, worn on the hat. Even width, like the hat, so it sits centred.
+// The crown: next to tonight's top winner in the lobby, and on the hat of a clear carrot leader in Harvest. Even width, like the hat, so it sits centred.
 const CROWN = [
   ".k..kk..k.",
   "kYkkYYkkYk",

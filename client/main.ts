@@ -1,11 +1,11 @@
 import { Timeline } from "../shared/netcode.ts";
 import {
-  ACT, BOMB, COLS, CROP, CURSES, DOWN, GHOST_RELOAD, HARVEST, LANES, LEFT, MAPS, MODES, NIGHT, RIGHT, ROBBED, ROUND_CHOICES, ROWS, TICK_HZ,
-  TILE, UP, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor, type Game, type Knockout, type Stats,
+  ACT, BOMB, CHEAT_SHIFT, COLS, CROP, CURE, CURSES, DOWN, GHOST_RELOAD, GOD, HARVEST, LANES, LEFT, MAPS, MAX_OUT, MODES, NIGHT, RIGHT, ROBBED,
+  ROUND_CHOICES, ROWS, TICK_HZ, TILE, UP, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor, type Game, type Knockout, type Stats,
 } from "../shared/sim.ts";
 import { music, setVolume, sfx, unlock, volume } from "./audio.ts";
 import { CROWN_TOP, render } from "./render.ts";
-import { ITEM_TILES, TRAINERS } from "./sprites.ts";
+import { COLORS, CROWN_IMG, ITEM_TILES, TRAINERS } from "./sprites.ts";
 
 const TICK_MS = 1000 / TICK_HZ;
 const MARGIN = 2; // extra ticks of lead, so jitter doesn't make our inputs late
@@ -18,7 +18,7 @@ const ITEM_HELP = [
   "Kick: walk into an orb to send it sliding",
   "Shield: survive one blast",
   "Remote: your orbs wait for X / Shift",
-  "Pierce: blasts go straight through bushes",
+  "Pierce: blasts go straight through crates",
   "Napalm: your fire burns for 2 seconds",
   "Skull: a random 10 s curse you pass on by touch, or Robbed: you lose every power-up",
   "Glove: hold X / Shift by an orb to carry it, let go to throw it over walls",
@@ -34,7 +34,7 @@ const MODE_HINTS = [
 ];
 const MODE_HELP = [
   "Last one (or team) standing wins. At 0:00 the walls close in, or it's a draw with Sudden death off.",
-  "Most carrots at 0:00 wins; teams add theirs up. Break bushes to find carrots. Knocked out? You drop half and you're back 2 s later.",
+  "Most carrots at 0:00 wins; teams add theirs up. Break crates to find carrots. Knocked out? You drop half and you're back 2 s later.",
   "Last one standing wins. Bump into someone to pass the potato; its timer keeps running. Whoever holds it at 0 is out.",
 ];
 const TEAM_NAMES = ["Teal & Green", "Red & Purple"]; // team = seat % 2
@@ -42,12 +42,13 @@ const TEAM_NAMES = ["Teal & Green", "Red & Purple"]; // team = seat % 2
 const AWARDS: [keyof Stats, string, (n: number) => string][] = [
   ["kos", "Most knockouts", (n) => `${n} KO${n === 1 ? "" : "s"}`],
   ["comebacks", "Comeback kid", (n) => `${n} comeback${n === 1 ? "" : "s"}`],
-  ["curses", "Hot potato", (n) => `passed ${n} curse${n === 1 ? "" : "s"}`],
-  ["bushes", "Bush whacker", (n) => `${n} bush${n === 1 ? "" : "es"}`],
+  ["curses", "Bad apple", (n) => `${n} hand-off${n === 1 ? "" : "s"}`], // curses and potatoes passed on
+  ["bushes", "Crate cracker", (n) => `${n} crate${n === 1 ? "" : "s"}`],
   ["pickups", "Collector", (n) => `${n} power-up${n === 1 ? "" : "s"}`],
-  ["crops", "Top farmer", (n) => `${n} carrot${n === 1 ? "" : "s"}`],
+  ["crops", "Carrot top", (n) => `${n} carrot${n === 1 ? "" : "s"}`],
   ["orbs", "Trigger happy", (n) => `${n} orb${n === 1 ? "" : "s"}`],
   ["oops", "Oops!", (n) => `own orb ×${n}`],
+  ["cheats", "Cheater!", (n) => `${n} cheat${n === 1 ? "" : "s"}`],
 ];
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -101,13 +102,15 @@ interface LobbySeat {
   name: string;
   ready: boolean;
   you: boolean;
-  leader: boolean; // been in the room longest
+  champ: boolean; // most match wins tonight, on their own: wears the crown
 }
 interface Lobby {
   code: string;
   seats: (LobbySeat | null)[];
   bots: boolean;
-  settings: { map: number; teams: boolean; winRounds: number; roundSecs: number; revenge: boolean; shrink: boolean; items: number; mode: number };
+  settings: {
+    map: number; teams: boolean; winRounds: number; roundSecs: number; revenge: boolean; shrink: boolean; items: number; mode: number; cheats: boolean;
+  };
   tally: { name: string; wins: number; you: boolean }[];
   totals: { name: string; stats: Stats; you: boolean }[]; // award stats summed over every match in this room
   countdown: number;
@@ -132,11 +135,6 @@ let lastSync = 0;
 const send = (msg: unknown) => ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
 const nameOf = (i: number) => (i === me ? "You" : roster[i]?.name || `P${i + 1}`);
 const seats = () => roster.map((r) => r.seat);
-// Which sim player wears the room leader's crown: the lobby says which seat, the roster maps seats to players.
-function leader() {
-  const seat = lobby?.seats.findIndex((s) => s?.leader) ?? -1;
-  return seat < 0 ? -1 : roster.findIndex((r) => !r.bot && r.seat === seat);
-}
 
 function connect() {
   const s = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?room=${room}`);
@@ -207,11 +205,24 @@ addEventListener("keydown", (e) => {
 addEventListener("keyup", (e) => (held &= ~keyOf(e)));
 addEventListener("blur", () => (held = 0));
 addEventListener("keydown", unlock); // browsers only start audio from a user gesture
+
+// Cheats, when the room allows them: G god mode, M max out, C lift curse, 1 to 9 and 0 the first ten power-ups.
+// A tap goes out as a cheat id in the input for one tick, so every client applies it on the same tick.
+const CHEAT_KEYS: Record<string, number> = { g: GOD, m: MAX_OUT, c: CURE };
+"1234567890".split("").forEach((k, i) => (CHEAT_KEYS[k] = i + 1));
+let cheatTap = 0;
+addEventListener("keydown", (e) => {
+  const cheat = CHEAT_KEYS[e.key.toLowerCase()];
+  if (!cheat || e.repeat || !tl || me < 0 || !shown.opts.cheats) return;
+  if (e.ctrlKey || e.metaKey || e.altKey || (e.target instanceof Element && e.target.closest("input, button, select"))) return;
+  e.preventDefault();
+  cheatTap = cheat;
+});
 addEventListener("pointerdown", unlock);
 
 // Gamepads: any connected pad plays as you. D-pad or left stick moves, A drops an orb, B / X detonates.
 // In the lobby, A or Start toggles ready.
-const START = 64;
+const START = 1 << 16; // not a game input: stripped before sending
 let padPrev = 0;
 function padInput() {
   let bits = 0;
@@ -243,6 +254,7 @@ let lastShrink = 0;
 let lastTile = -1;
 let lastFire: number[] = [];
 let lastPotato = 0;
+let lastBeat = ""; // which tick of the potato's countdown we last played
 let lastWarn = false;
 let backUntil = 0; // show "You're back in!" until then
 let closeUntil = 0; // ...and "Close call!"
@@ -262,7 +274,7 @@ function listen(g: Game) {
   lastOrbs = orbs;
   if (g.players.some((p, i) => lastAlive[i] && !p.alive)) sfx.ko();
   if (g.phase === "play" && lastPhase === "play" && g.players.some((p, i) => lastAlive[i] === false && p.alive)) {
-    sfx.comeback(); // a ghost's orb got someone: they're back
+    (g.opts.mode === HARVEST ? sfx.respawn : sfx.comeback)(); // Harvest respawns are often: save the fanfare for a ghost's comeback
     if (lastAlive[me] === false && g.players[me]?.alive) backUntil = performance.now() + 2000;
   }
   lastAlive = g.players.map((p) => p.alive);
@@ -291,13 +303,18 @@ function listen(g: Game) {
   lastHurry = hurry;
 
   const p = g.players[me];
-  const kit = p ? [p.bombs, p.range, p.speed, +p.kick, +p.remote, +p.shield, +p.pierce, +p.napalm, +p.glove, +p.frost, p.crops] : [];
+  const kit = p ? [p.bombs, p.range, p.speed, +p.kick, +p.remote, +p.shield, +p.pierce, +p.napalm, +p.glove, +p.frost, p.crops, +p.god] : [];
   if (p?.alive && kit.some((v, i) => v > lastKit[i])) sfx.pickup();
   lastKit = kit;
   if (p?.curse && !lastCurse) sfx.curse();
   lastCurse = p?.curse ?? 0;
-  if (p?.potato && !lastPotato) sfx.curse();
+  if (p?.potato && !lastPotato) sfx.potato();
   lastPotato = p?.potato ?? 0;
+  // Everyone hears the potato's last 3 s: a tick every half second, then every quarter for the last one.
+  const left = Math.max(0, ...g.players.map((q) => (q.alive ? q.potato : 0)));
+  const beat = left > 0 && left <= 3 * TICK_HZ ? (left > TICK_HZ ? `s${Math.ceil(left / 30)}` : `f${Math.ceil(left / 15)}`) : "";
+  if (beat && beat !== lastBeat) sfx.potatoTick(left <= TICK_HZ);
+  lastBeat = beat;
   if (g.shrink > lastShrink) sfx.tick(g.shrink % 2 === 0); // a wall fell
   lastShrink = g.shrink;
 }
@@ -312,6 +329,7 @@ document.addEventListener("visibilitychange", () => {
 // ---------- lobby ----------
 const FACES = TRAINERS.map((dirs) => dirs[1][0].toDataURL());
 const CROP_ICON = ITEM_TILES[CROP]!.toDataURL();
+const CROWN_ICON = CROWN_IMG.toDataURL();
 const nameInput = $<HTMLInputElement>("name");
 nameInput.value = storage.get(() => localStorage, "name") ?? "";
 nameInput.onchange = () => {
@@ -326,6 +344,7 @@ const winsPick = $<HTMLSelectElement>("wins");
 const timePick = $<HTMLSelectElement>("time");
 const revengePick = $<HTMLInputElement>("revenge");
 const shrinkPick = $<HTMLInputElement>("shrink");
+const cheatsPick = $<HTMLInputElement>("cheats");
 mapPick.append(...["Random", ...MAPS].map((name, i) => new Option(name, String(i - 1))));
 gamePick.append(...MODES.map((name, i) => new Option(name, String(i))));
 timePick.append(...ROUND_CHOICES.map((s) => new Option(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`, String(s))));
@@ -351,8 +370,32 @@ const sendSettings = () =>
     shrink: shrinkPick.checked,
     items: itemPicks.reduce((mask, { id, box }) => (box.checked ? mask | (1 << id) : mask), 0),
     mode: Number(gamePick.value),
+    cheats: cheatsPick.checked,
   });
-for (const el of [gamePick, mapPick, modePick, winsPick, timePick, revengePick, shrinkPick, ...itemPicks.map((p) => p.box)]) el.onchange = sendSettings;
+for (const el of [gamePick, mapPick, modePick, winsPick, timePick, revengePick, shrinkPick, cheatsPick, ...itemPicks.map((p) => p.box)]) {
+  el.onchange = sendSettings;
+}
+
+// The cheat bar under the arena, for players in a match with cheats on. Same cheats as the keys.
+const cheatBar = $<HTMLFieldSetElement>("cheatBar");
+function cheatButton(cheat: number, name: string, help: string, icon?: HTMLCanvasElement) {
+  const b = Object.assign(document.createElement("button"), { type: "button", title: help });
+  b.append(icon ? Object.assign(new Image(), { src: icon.toDataURL(), alt: name }) : name);
+  const key = Object.keys(CHEAT_KEYS).find((k) => CHEAT_KEYS[k] === cheat);
+  if (key) b.append(Object.assign(document.createElement("kbd"), { textContent: key.toUpperCase() }));
+  b.onclick = () => {
+    cheatTap = cheat;
+    b.blur(); // so Space goes back to the game
+  };
+  return b;
+}
+const godButton = cheatButton(GOD, "God mode", "Blasts and tractors can't touch you. Walls and the potato still can.");
+cheatBar.append(
+  godButton,
+  cheatButton(MAX_OUT, "Max out", "Orbs, fire and speed to the top"),
+  cheatButton(CURE, "Lift curse", "Ends your curse. What Robbed took stays gone."),
+  ...itemPicks.map(({ id }) => cheatButton(id, ITEM_HELP[id].split(":")[0], ITEM_HELP[id], ITEM_TILES[id]!))
+);
 const toggleReady = () => send({ type: "ready", ready: !lobby?.seats.find((s) => s?.you)?.ready });
 $("ready").onclick = toggleReady;
 for (const k of ["sound", "music"] as const) {
@@ -387,12 +430,7 @@ function showLobby() {
       const label = document.createElement("span");
       const who = s ? `${s.name}${s.you ? " (you)" : ""}: ${s.ready ? "ready" : "not ready"}` : l.bots ? "Bot" : "Empty";
       label.textContent = l.settings.teams ? `${who} · ${TEAM_NAMES[seat % 2]}` : who;
-      if (s?.leader) {
-        const crown = Object.assign(document.createElement("span"), { className: "crown", textContent: "👑", title: "Room leader" });
-        crown.setAttribute("role", "img");
-        crown.setAttribute("aria-label", "Room leader");
-        label.prepend(crown, " ");
-      }
+      if (s?.champ) label.prepend(Object.assign(new Image(), { className: "crown", src: CROWN_ICON, alt: "Most wins tonight", title: "Most wins tonight" }), " ");
       li.append(face, label);
       if (!s) {
         const sit = document.createElement("button");
@@ -420,8 +458,9 @@ function showLobby() {
   timePick.value = String(l.settings.roundSecs);
   revengePick.checked = l.settings.revenge;
   shrinkPick.checked = l.settings.shrink;
+  cheatsPick.checked = l.settings.cheats;
   gamePick.value = String(l.settings.mode);
-  $("gameHelp").textContent = MODE_HINTS[l.settings.mode] ?? "";
+  $("gameHelp").textContent = `${MODE_HINTS[l.settings.mode] ?? ""}${l.settings.cheats ? " Cheats are on." : ""}`;
   revengePick.disabled = shrinkPick.disabled = l.settings.mode === HARVEST; // Harvest respawns you and runs to 0:00
   for (const { id, box } of itemPicks) box.checked = !!(l.settings.items & (1 << id));
   const mine = l.seats.find((s) => s?.you);
@@ -487,7 +526,7 @@ function sentence(k: Knockout) {
   const whose = (i: number) => (i === me ? "Your" : `${nameOf(i)}'s`);
   if (k.how === "wall") return `Walls crushed ${name(k.victim, false)}`;
   if (k.how === "tractor") return `Tractor ran over ${name(k.victim, false)}`;
-  if (k.how === "potato") return `${whose(k.victim)} potato went off`;
+  if (k.how === "potato") return k.by >= 0 ? `${name(k.by, true)} cooked ${name(k.victim, false)}` : `${whose(k.victim)} potato went off`;
   if (k.how === "self") return k.victim === me ? "You KO'd yourself" : `${nameOf(k.victim)} KO'd themselves`;
   const by = k.how === "ghost" ? `${whose(k.by)} ghost` : name(k.by, true);
   const text = `${by} KO'd ${k.how === "team" ? "teammate " : ""}${name(k.victim, false)}`;
@@ -512,7 +551,7 @@ function showLog(g: Game) {
   $("matchLog").replaceChildren(...items);
 }
 
-// ---------- kill feed and announcer: worked out from the knockout log alone, so a rewind corrects them too ----------
+// ---------- KO feed and announcer: worked out from the knockout log alone, so a rewind corrects them too ----------
 const FEED_TICKS = 4 * TICK_HZ;
 let lastFeed = "";
 function showFeed(g: Game) {
@@ -533,9 +572,11 @@ function callout(g: Game) {
   const streak = g.log.filter(scored).length;
   if (scored(k) && streak >= 2) return streak >= 3 ? "TRIPLE KO!" : "DOUBLE KO!";
   if (k.back) return "COMEBACK!";
+  const special = KO_CALLS[k.how]; // how it happened beats who's left: a tractor KO is FLATTENED!, even down to the final two
+  if (special) return special;
   const standing = g.players.filter((p) => p.alive).length;
   if (!g.opts.teams && g.opts.mode !== HARVEST && g.players.length > 2 && standing === 2) return "FINAL TWO!";
-  return KO_CALLS[k.how] ?? (g.log.length === 1 ? "FIRST KO!" : "");
+  return g.log.filter((e) => e.round === g.round).length === 1 ? "FIRST KO!" : "";
 }
 
 let lastCall = "";
@@ -558,11 +599,12 @@ function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
   const box = $("tags");
   const players = g?.players ?? [];
   while (box.children.length < players.length) box.append(document.createElement("span"));
-  const crowned = leader();
+  const crown = g ? crowned(g) : -1;
+  const dark = g?.map === NIGHT && !!g.players[me]?.alive; // Night Farm: tags would give the others away (ghosts see all: they aim)
   [...box.children].forEach((el, i) => {
     const tag = el as HTMLElement;
     const p = players[i];
-    tag.hidden = !p || !(p.alive || p.ghost) || (g!.map === NIGHT && me >= 0 && i !== me); // Night Farm: tags would give them away
+    tag.hidden = !p || !(p.alive || p.ghost) || (dark && i !== me && !p.potato); // whoever has the potato always shows
     if (tag.hidden) return;
     const d = drift[i] ?? { x: 0, y: 0 };
     const potato = p.potato ? ` · ${Math.ceil(p.potato / TICK_HZ)}s` : "";
@@ -570,9 +612,18 @@ function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
     if (tag.textContent !== text) tag.textContent = text;
     if (tag.className !== cls) tag.className = cls;
     tag.style.left = `${((p.x + d.x) / PX / (COLS * 16)) * 100}%`;
-    const lift = p.carry ? 28 : i === crowned ? CROWN_TOP + 2 : 16; // above a carried orb, or the crown
-    tag.style.top = `${(((p.y + d.y) / PX - lift) / (ROWS * 16)) * 100}%`;
+    const lift = p.carry ? 28 : i === crown || p.god ? CROWN_TOP + 2 : 16; // above a carried orb, the crown or the halo
+    tag.style.top = `${(Math.max(7, (p.y + d.y) / PX - lift) / (ROWS * 16)) * 100}%`; // kept on the canvas for the top row
   });
+}
+
+// The arena's crown: Harvest's carrot leader, so the late round has someone to hunt. Only once they've pulled
+// clearly ahead, so a single early carrot doesn't crown anyone.
+const CROWN_LEAD = 3; // carrots ahead of everyone else
+function crowned(g: Game) {
+  if (g.opts.mode !== HARVEST) return -1;
+  const [first, second] = g.players.map((p, i) => ({ i, crops: p.crops })).sort((a, b) => b.crops - a.crops);
+  return first && first.crops - (second?.crops ?? 0) >= CROWN_LEAD ? first.i : -1;
 }
 
 // ---------- HUD ----------
@@ -619,9 +670,14 @@ function hud() {
   if (roomFull) [title, sub] = ["This room is full", "Open the page without ?room= to start your own."];
   else if (!connected) [title, sub] = [lobby ? "Connection lost" : "Connecting…", lobby ? "Reconnecting…" : "The server may take a minute to wake up."];
   else if (inLobby || !tl) title = "";
-  else if (g.phase === "ready") [title, sub] = [`Round ${g.round}: ${MAPS[g.map]}`, MODE_HINTS[g.opts.mode] ?? "Ready…"];
+  else if (g.phase === "ready") {
+    [title, sub] = [`Round ${g.round}: ${MAPS[g.map]}`, `${MODE_HINTS[g.opts.mode] ?? "Ready…"}${g.opts.cheats ? " Cheats are on." : ""}`];
+  }
   else if (g.phase === "result") title = g.roundWinner < 0 ? "Draw!" : won(g.roundWinner, "round");
   else if (g.phase === "over") [title, sub] = [won(g.matchWinner, "match"), "Back to the lobby in a moment…"];
+  // A free-for-all winner's title is in their seat colour (a 2v2 title names two colours, so it stays yellow).
+  const winner = g.phase === "over" ? g.matchWinner : g.phase === "result" ? g.roundWinner : -1;
+  const tint = tl && !inLobby && !g.opts.teams && winner >= 0 ? COLORS[seats()[winner]] : "";
   if (tl && g.phase === "over") lastAwards = awards(g.players.map((p, i) => ({ name: nameOf(i), stats: p.stats })));
   const toast =
     !tl || g.phase !== "play"
@@ -639,21 +695,28 @@ function hud() {
             ? "Robbed! You lost every power-up"
             : `Cursed: ${CURSES[you.curse]} (${Math.ceil(you.curseLeft / TICK_HZ)}s). Touch someone to pass it on!`
           : you?.ghost
-            ? ghostReady(g, you)
+            ? you.returned
+              ? "Ghost: no comeback, but your orbs still hit" // a spite ghost: already came back once this round
+              : ghostReady(g, you)
               ? "Ghost: run along the wall, Space lobs an orb in"
               : `Ghost: run along the wall. Next orb in ${Math.ceil((GHOST_RELOAD - (g.tick - Math.max(you.threwAt, you.diedAt))) / TICK_HZ)}s`
-            : you && !you.alive && you.returned
-            ? "Out until next round: you already came back once"
             : hurry && g.roundTick < limit + 3 * TICK_HZ
               ? "Hurry! The walls are closing in"
               : "";
   const score = g.players.map((p, i) => `${seats()[i]}:${nameOf(i)}:${p.wins}:${p.alive || g.phase === "ready"}:${p.crops}`).join(",");
 
   const shownAwards = tl && g.phase === "over" ? lastAwards : [];
-  const key = [score, g.opts.winRounds, timer, title, sub, toast, inLobby, connected, me, JSON.stringify(shownAwards)].join("|");
+  const cheats = !!tl && !inLobby && me >= 0 && !!g.opts.cheats;
+  const canCheat = !!you?.alive && g.phase === "play";
+  const key = [
+    score, g.opts.winRounds, timer, title, tint, sub, toast, inLobby, connected, me, JSON.stringify(shownAwards), cheats, canCheat, you?.god,
+  ].join("|");
   if (key === lastHud) return;
   lastHud = key;
   showAwards($("awards"), shownAwards);
+  cheatBar.hidden = !cheats;
+  cheatBar.disabled = !canCheat; // knocked out, or between rounds
+  godButton.setAttribute("aria-pressed", String(!!you?.god));
   $("board").hidden = inLobby || !tl;
   $("timer").textContent = timer;
   $("timer").classList.toggle("hurry", hurry);
@@ -665,6 +728,7 @@ function hud() {
   $("lobby").hidden = !connected || !inLobby;
   $("status").hidden = !title;
   $("statusText").textContent = title;
+  $("statusText").style.color = tint;
   $("statusSub").textContent = sub;
   if (toast) $("toast").textContent = toast;
   $("toast").classList.toggle("show", !!toast);
@@ -687,8 +751,8 @@ function frame(now: number) {
     while (tl.g.tick < target && steps++ < MAX_STEPS) {
       const t = tl.g.tick + 1;
       if (me >= 0) {
-        const input = (held | tapped | pad) & ~START;
-        tapped = 0;
+        const input = ((held | tapped | pad) & ~START) | (cheatTap << CHEAT_SHIFT);
+        tapped = cheatTap = 0;
         tl.setMine(t + delay, input);
         if (input !== lastSent) send({ type: "in", t: t + delay, i: (lastSent = input) });
       }
@@ -703,7 +767,7 @@ function frame(now: number) {
     }
   }
   music(volume.music > 0); // lobby too, once the browser has allowed audio
-  render(ctx, shown, seats(), tl?.drift, me, leader());
+  render(ctx, shown, seats(), tl?.drift, me, crowned(shown));
   nameTags(tl && !(lobby && !lobby.playing) ? shown : null, tl?.drift);
   hud();
   showLog(shown);

@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
-  ACT, BELT, BLOCK, BOMB, BUTTERFINGERS, COLS, CROP, CRUMBLE, DOWN, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
-  HARVEST, ICE, LANES, LEFT, NAPALM_FLAME, OVER_TICKS, POTATO, READY_TICKS, RESPAWN_TICKS, RESULT_TICKS, REVERSED, RIGHT, ROBBED, ROUND_TICKS, SKULL,
-  SHRINK_EVERY, SPAWNS, SPIRAL, SWAP, TICK_HZ, TRACTOR, WALL, center, createGame, roundTicks, tickGame, tileAt, tractor, type Bomb,
+  ACT, BELT, BLOCK, BOMB, BUTTERFINGERS, CHEAT_SHIFT, COLS, CROP, CRUMBLE, CURE, DOWN, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
+  GOD, HARVEST, ICE, KICK, LANES, LEFT, MAX_BOMBS, MAX_OUT, MAX_RANGE, NAPALM_FLAME, ORB_UP, OVER_TICKS, POTATO, READY_TICKS, RESPAWN_TICKS, RESULT_TICKS, REVERSED, RIGHT, ROBBED, ROUND_TICKS, SKULL,
+  SHRINK_EVERY, SPAWNS, SPEEDS, SPIRAL, SWAP, TICK_HZ, TRACTOR, WALL, center, createGame, roundTicks, tickGame, tileAt, tractor, type Bomb,
   type Game,
   type Options,
 } from "./sim.ts";
@@ -205,7 +205,7 @@ test("revenge: a knocked-out player rides the rim and lobs orbs inward, with a w
   assert.equal(p.stats.orbs, 2, "ready again");
 });
 
-test("Pierce blasts carry on through bushes; Napalm fire burns longer", () => {
+test("Pierce blasts carry on through crates; Napalm fire burns longer", () => {
   for (const pierce of [false, true]) {
     const g = arena();
     place(g, 0, 7, 7);
@@ -293,7 +293,7 @@ test("revenge comeback: a ghost whose orb knocks someone out takes their place",
   }
 });
 
-test("revenge: one comeback a round; the next knockout is for good, until the next round", () => {
+test("revenge: one comeback a round; after that you're a spite ghost whose orbs still score but can't bring you back", () => {
   const g = arena(4);
   const ghost = Object.assign(g.players[0], { alive: false, ghost: true, diedAt: 0, x: center(0), y: center(5) });
   g.tick = GHOST_RELOAD;
@@ -308,11 +308,21 @@ test("revenge: one comeback a round; the next knockout is for good, until the ne
   g.bombs.push(orb(2, 7, 3, { fuse: 1 }));
   run(g, 1 + GHOST_DELAY + 10);
   assert.equal(ghost.alive, false);
-  assert.equal(ghost.ghost, false, "out for the rest of the round");
+  assert.ok(ghost.ghost, "back on the rim again, as a spite ghost");
   assert.equal(g.phase, "play", "the other two play on");
 
-  g.players[3].alive = false; // one left standing: round over
-  run(g, 1 + RESULT_TICKS + 1);
+  Object.assign(ghost, { x: center(0), y: center(9) }); // left wall, row 9: lobs 3 tiles in, onto player 4
+  place(g, 3, 3, 9);
+  g.tick += GHOST_RELOAD; // reloaded
+  const kos = ghost.stats.kos;
+  tickGame(g, [BOMB]);
+  run(g, FUSE);
+  assert.equal(g.players[3].alive, false);
+  assert.equal(ghost.stats.kos, kos + 1, "the knockout counts");
+  assert.ok(ghost.ghost && !ghost.alive, "but there's no second comeback");
+  assert.deepEqual([g.log.at(-1)!.how, g.log.at(-1)!.back], ["ghost", false]);
+
+  run(g, RESULT_TICKS + 2); // one left standing: on to the next round
   assert.equal(g.round, 2);
   assert.equal(ghost.returned, false, "a fresh comeback next round");
 });
@@ -334,8 +344,8 @@ test("Glove throws an orb over walls; it bounces off taken tiles and wraps aroun
     assert.equal(b.hops, 0, "landed");
     return tileAt(b.x, b.y);
   };
-  assert.equal(throwFrom(1, [idx(2, 1), idx(3, 1)]), idx(4, 1), "over two bushes");
-  assert.equal(throwFrom(1, [idx(4, 1)]), idx(5, 1), "bounced off a bush");
+  assert.equal(throwFrom(1, [idx(2, 1), idx(3, 1)]), idx(4, 1), "over two crates");
+  assert.equal(throwFrom(1, [idx(4, 1)]), idx(5, 1), "bounced off a crate");
   assert.equal(throwFrom(13, []), idx(3, 1), "over the wall, back in on the far side");
 });
 
@@ -370,7 +380,7 @@ test("Glove: hold to carry an orb (its fuse waits), let go to throw it the way y
   assert.equal(g.bombs.length, 0, "and the fire sets it off");
 });
 
-test("Swap trades places with an opponent; stats count orbs, bushes and own goals", () => {
+test("Swap trades places with an opponent; stats count orbs, crates and own goals", () => {
   const g = arena();
   place(g, 0, 1, 1);
   place(g, 1, 7, 7);
@@ -425,7 +435,7 @@ test("room rules: round time, sudden death off, revenge off, and which power-ups
     return seen;
   };
   assert.deepEqual([...drops(1 << SWAP)], [SWAP], "only switched-on power-ups drop");
-  assert.equal(drops(0).size, 0, "all off: bushes drop nothing");
+  assert.equal(drops(0).size, 0, "all off: crates drop nothing");
 });
 
 test("the round goes to the survivor at once: the next falling wall can't turn a clear win into a draw", () => {
@@ -553,6 +563,42 @@ test("Hot Potato: someone gets it at Go, a touch passes it on, and it knocks out
   assert.equal(g.players.filter((p) => p.alive && p.potato).length, 1, "a fresh one goes to someone still standing");
 });
 
+test("Hot Potato: whoever passed it on scores the knockout, but not a fresh potato or a pass to a teammate", () => {
+  const koOf = (g: Game) => ({ victim: g.log.at(-1)!.victim, by: g.log.at(-1)!.by, how: g.log.at(-1)!.how });
+  // Bump player `to` into whoever holds the potato, then let it run out on them.
+  const passAndBurn = (g: Game, to: (from: number) => number) => {
+    const from = g.players.findIndex((p) => p.potato);
+    const id = to(from);
+    Object.assign(g.players[id], { x: g.players[from].x, y: g.players[from].y });
+    tickGame(g, []);
+    assert.ok(g.players[id].potato > 0, "passed on");
+    g.players[id].potato = 1;
+    tickGame(g, []);
+    return [from, id];
+  };
+
+  const g = createGame(3, 5, { mode: POTATO });
+  run(g, READY_TICKS);
+  const [from, to] = passAndBurn(g, (f) => (f + 1) % 3);
+  assert.deepEqual(koOf(g), { victim: to, by: from, how: "potato" });
+  assert.equal(g.players[from].stats.kos, 1);
+
+  const fresh = g.players.findIndex((p) => p.alive && p.potato); // handed out after that knockout: nobody passed it
+  const kos = g.players.map((p) => p.stats.kos);
+  g.players[fresh].potato = 1;
+  tickGame(g, []);
+  assert.deepEqual(koOf(g), { victim: fresh, by: -1, how: "potato" });
+  assert.deepEqual(g.players.map((p) => p.stats.kos), kos, "nobody scores");
+  assert.equal(g.phase, "result", "one left standing");
+  assert.ok(g.players.every((p) => !p.potato), "and the winner isn't handed a fresh potato");
+
+  const t = createGame(4, 5, { mode: POTATO, teams: [0, 1, 0, 1] });
+  run(t, READY_TICKS);
+  const [passer, mate] = passAndBurn(t, (f) => (f + 2) % 4);
+  assert.deepEqual(koOf(t), { victim: mate, by: -1, how: "potato" });
+  assert.equal(t.players[passer].stats.kos, 0, "no KO for cooking your own teammate");
+});
+
 test("Harvest: crops count, a knockout spills half and you respawn, and the most crops win at 0:00", () => {
   const g = arena(2, { mode: HARVEST });
   assert.deepEqual([g.opts.shrink, g.opts.revenge], [false, false]);
@@ -594,4 +640,50 @@ test("Tractor Lane: the road stays clear, a warning comes first, then the tracto
   assert.equal(g.log.at(-1)!.how, "tractor");
   assert.equal(g.bombs.length, 0, "squashed");
   assert.equal(g.fire[idx(9, row)], 0, "without a bang");
+});
+
+test("cheats: ignored unless the room allows them; then a tap gives a power-up, maxes you out, lifts a curse or toggles god mode", () => {
+  const tap = (cheat: number) => cheat << CHEAT_SHIFT;
+  const off = arena();
+  tickGame(off, [tap(KICK)]);
+  assert.equal(off.players[0].kick, false, "cheats off: the bits do nothing");
+
+  const g = arena(2, { cheats: true });
+  const p = g.players[0];
+  tickGame(g, [tap(ORB_UP)]);
+  tickGame(g, [tap(ORB_UP)]); // still held: one tap, one cheat
+  assert.equal(p.bombs, 2);
+  tickGame(g, []);
+  tickGame(g, [tap(ORB_UP) | RIGHT]); // tapped again, while walking
+  assert.equal(p.bombs, 3);
+  assert.ok(p.x > center(1), "the move still happens");
+
+  tickGame(g, [tap(MAX_OUT)]);
+  assert.deepEqual([p.bombs, p.range, p.speed], [MAX_BOMBS, MAX_RANGE, SPEEDS.length - 1]);
+  Object.assign(p, { curse: REVERSED, curseLeft: 300 });
+  tickGame(g, [tap(CURE)]);
+  assert.equal(p.curse, 0);
+  assert.equal(p.stats.cheats, 4);
+  assert.equal(p.stats.pickups, 0, "cheats aren't pickups");
+});
+
+test("god mode: blasts can't touch you, but sudden death walls still can", () => {
+  const g = arena(3, { cheats: true });
+  tickGame(g, [GOD << CHEAT_SHIFT]);
+  const p = g.players[0];
+  assert.equal(p.god, true);
+  place(g, 0, 2, 1);
+  g.bombs.push(orb(1, 1, 1, { fuse: 1, range: 2 }));
+  tickGame(g, []);
+  assert.ok(g.fire[idx(2, 1)] > 0);
+  assert.equal(p.alive, true, "standing in the fire");
+  g.grid[idx(2, 1)] = WALL;
+  tickGame(g, []);
+  assert.equal(p.alive, false, "a falling wall still crushes you");
+
+  const h = arena(2, { cheats: true });
+  tickGame(h, [GOD << CHEAT_SHIFT]);
+  tickGame(h, []);
+  tickGame(h, [GOD << CHEAT_SHIFT]);
+  assert.equal(h.players[0].god, false, "a second tap turns it off");
 });

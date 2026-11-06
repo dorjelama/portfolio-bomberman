@@ -111,6 +111,13 @@ export const sfx = {
   lose: () => notes([[392, 0.15], [330, 0.15], [262, 0.4]], "triangle", 0.3),
   announce: () => notes([[784, 0.07], [1047, 0.07], [1568, 0.2]], "square", 0.18),
   rumble: () => tone(55, 1.2, "sawtooth", 0.25, 80), // a tractor's on its way
+  respawn: () => notes([[523, 0.06], [784, 0.12]], "triangle", 0.2), // Harvest: back at your corner (lighter than a comeback)
+  // Hot Potato: you've got it (a sizzle and a rising yelp), then everyone hears its last 3 s tick, faster for the last one.
+  potato: () => {
+    hiss(0.2, 0.35, 4000, 900);
+    tone(520, 0.12, "square", 0.18, 880);
+  },
+  potatoTick: (fast: boolean) => tone(fast ? 1568 : 1175, 0.04, "square", 0.14),
 };
 
 // ---------- music: a 4-bar loop in A minor, 16 steps per bar ----------
