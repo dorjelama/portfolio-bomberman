@@ -6,6 +6,7 @@ const ctx = await esbuild.context({
   bundle: true,
   format: "esm",
   sourcemap: true,
+  loader: { ".png": "dataurl" },
   outfile: "public/main.js",
   logLevel: "info",
 });

@@ -26,13 +26,41 @@
       main { max-width: 980px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
       header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
       h1 { font-size: 14px; margin: 0; color: var(--accent); }
-      .hud { display: flex; flex-wrap: wrap; gap: 4px 16px; }
-      #score { display: flex; flex-wrap: wrap; gap: 0 12px; }
-      .hud { align-items: center; }
-      .mini { padding: 4px 8px; background: var(--panel); color: var(--ink); border: 2px solid var(--dim); }
-      .mini[aria-pressed="false"] { opacity: 0.5; }
+      .hud { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; }
+      /* Scoreboard: player cards either side of the timer. Names are white for contrast; the colour is the border and pips. */
+      #board { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+      #board[hidden] { display: none; }
+      #board .card { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; background: var(--panel); border: 2px solid currentColor; border-radius: 4px; transition: opacity 0.2s; }
+      #board .card.you { outline: 2px solid var(--accent); outline-offset: 2px; }
+      #board .card.out { opacity: 0.4; }
+      #board .card img { width: 28px; height: 28px; image-rendering: pixelated; }
+      #board .who { color: var(--ink); font-size: 11px; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #board .pips { display: flex; gap: 4px; }
+      #board .pips i { width: 10px; height: 10px; border: 2px solid currentColor; border-radius: 50%; }
+      #board .pips i.won { background: currentColor; }
+      #timer { font-size: 16px; line-height: 1; padding: 8px 12px; min-width: 7ch; text-align: center; background: var(--bg); border: 2px solid var(--ink); border-radius: 4px; }
+      #timer.hurry { color: var(--p2); border-color: var(--p2); }
+      /* Narrow screens: timer on its own row, cards two by two underneath. */
+      @media (max-width: 640px) {
+        #board { display: grid; grid-template-columns: 1fr 1fr; }
+        #timer { grid-column: 1 / -1; justify-self: center; order: -1; }
+      }
+      .vol { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+      .vol input { width: 72px; accent-color: var(--accent); cursor: pointer; }
+      /* Arena + room panel: side by side when there's room, stacked otherwise. */
+      .play { display: grid; gap: 12px; }
+      @media (min-width: 1100px) {
+        main { max-width: 1280px; }
+        .play { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+        #room { max-height: calc(100dvh - 170px); overflow: auto; }
+      }
+      #room { display: grid; gap: 8px; align-content: start; }
+      #room h2 { margin: 4px 0 0; }
       #tally { margin: 0; color: var(--accent); }
-      #tally:empty { display: none; }
+      #room #lastAwards:empty, #matchLog:empty { display: block; }
+      #tally:empty::before, #room ul:empty::before, #room ol:empty::before { content: "Nothing yet"; color: var(--dim); }
+      #matchLog { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 9px; }
+      #matchLog b { color: var(--dim); font-weight: normal; }
       .awards { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; text-align: left; font-size: 9px; }
       .awards:empty { display: none; }
       .awards li::before { content: "★ "; color: var(--accent); }
@@ -40,10 +68,8 @@
       #tags span { position: absolute; transform: translate(-50%, -100%); font-size: clamp(7px, 0.9vw, 10px); line-height: 1; white-space: nowrap; padding: 2px 3px; background: rgb(20 20 40 / 0.65); border-radius: 2px; }
       #tags span[hidden] { display: none; }
       #tags .ghost { opacity: 0.6; }
-      .hud .out { opacity: 0.4; }
-      #timer.hurry { color: var(--p2); }
       /* Fit the whole board on screen: the stage is as wide as the viewport height allows. */
-      .stage { position: relative; width: min(100%, calc((100dvh - 120px) * 240 / 208)); margin: 0 auto; border: 4px solid var(--ink); border-radius: 4px; background: #000; }
+      .stage { position: relative; width: min(100%, calc((100dvh - 170px) * 240 / 208)); margin: 0 auto; border: 4px solid var(--ink); border-radius: 4px; background: #000; }
       canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
       #status { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; text-align: center; padding: 16px; background: rgb(20 20 40 / 0.6); }
       #status[hidden] { display: none; }
@@ -68,6 +94,13 @@
       #seats span { flex: 1; overflow-wrap: anywhere; }
       #seats button { padding: 6px 8px; }
       #lobby .settings { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+      #rules { display: grid; gap: 8px; }
+      #rules[open] { padding: 8px; border: 2px solid var(--dim); border-radius: 4px; }
+      #rules summary { cursor: pointer; color: var(--accent); }
+      #rules > * + * { margin-top: 8px; }
+      #itemPicks { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px 10px; }
+      #itemPicks label { gap: 6px; font-size: 9px; }
+      #itemPicks img { width: 20px; height: 20px; image-rendering: pixelated; }
       select { font: inherit; padding: 6px; background: var(--bg); color: var(--ink); border: 2px solid var(--dim); }
       input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
       button { font: inherit; background: var(--accent); color: var(--bg); border: 0; padding: 10px 12px; cursor: pointer; }
@@ -83,14 +116,17 @@
     <main>
       <header>
         <h1>Boom Orbs</h1>
-        <div class="hud" aria-live="off">
-          <span id="score"></span>
-          <span id="timer">2:00</span>
-          <button id="soundBtn" class="mini" type="button">Sound on</button>
-          <button id="musicBtn" class="mini" type="button">Music on</button>
+        <div class="hud">
+          <label class="vol">Sound <input type="range" id="soundVol" min="0" max="100" step="5" /></label>
+          <label class="vol">Music <input type="range" id="musicVol" min="0" max="100" step="5" /></label>
         </div>
       </header>
 
+      <div id="board" aria-label="Scoreboard" hidden>
+        <div id="timer">2:00</div>
+      </div>
+
+      <div class="play">
       <div class="stage">
         <canvas id="game" width="240" height="208" aria-label="Arena"></canvas>
         <div id="tags" aria-hidden="true"></div>
@@ -116,12 +152,30 @@
                 <select id="wins"><option>1</option><option>2</option><option>3</option><option>5</option></select>
               </label>
             </div>
+            <details id="rules">
+              <summary>Rules</summary>
+              <div class="settings">
+                <label>Round time <select id="time"></select></label>
+                <label><input type="checkbox" id="revenge" /> Revenge ghosts</label>
+                <label><input type="checkbox" id="shrink" /> Sudden death (walls close in at 0:00; off = draw)</label>
+              </div>
+              <p class="help">Power-ups that can drop:</p>
+              <div id="itemPicks"></div>
+            </details>
             <button id="ready" type="button" hidden>Ready!</button>
             <p id="lobbyNote" class="help" aria-live="polite"></p>
-            <p id="tally"></p>
-            <ul id="lastAwards" class="awards" aria-label="Last match awards"></ul>
           </div>
         </section>
+      </div>
+
+      <aside id="room" class="panel" aria-label="This room">
+        <h2>Tonight</h2>
+        <p id="tally"></p>
+        <h2>Last match awards</h2>
+        <ul id="lastAwards" class="awards"></ul>
+        <h2>Knockouts</h2>
+        <ol id="matchLog"></ol>
+      </aside>
       </div>
 
       <p class="help">

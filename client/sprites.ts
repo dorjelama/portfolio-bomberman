@@ -1,5 +1,12 @@
 // Original pixel art as string grids: one char per pixel, "." is transparent.
-// The trainer is Critter Catch's sprite (portfolio-game/public/sprites.js), recoloured per player.
+// Arena tiles and players come from free packs in client/art: Harvest Summer by SnowHex (grass, fences,
+// stumps) and Super Retro Ranch by Gif (crates, the farmer).
+import farmerUrl from "./art/ranch-farmer.png";
+import fencesUrl from "./art/harvest-fences.png";
+import tilesUrl from "./art/harvest-tiles.png";
+import treesUrl from "./art/harvest-trees.png";
+import ranchUrl from "./art/ranch-objects.png";
+
 const PALETTE: Record<string, string> = {
   k: "#1b1b2f", // outline
   n: "#2b2f77", // beanie
@@ -24,83 +31,6 @@ const PALETTE: Record<string, string> = {
   G: "#8fd468",
   d: "#3d7f2c",
 };
-const P2 = { n: "#7a1f2b", N: "#b33a4a", t: "#e0a43a", o: "#1f9e9a" };
-const P3 = { n: "#2f6b35", N: "#4fa055", t: "#ffd23f", o: "#2b2f77" };
-const P4 = { n: "#5b2b7a", N: "#8a4fb3", t: "#f4a7c4", o: "#4a52b3" };
-
-const HEAD_FRONT = [
-  "....kkkkkkkk....",
-  "...knnnnNNnnk...",
-  "..knnnnnnwnnnk..",
-  "..kNNNNNNNNNNk..",
-  "..khhhhhhhhhhk..",
-  "..khsssssssshk..",
-  "..khsesssseshk..",
-  "...ksssSSsssk...",
-];
-const HEAD_BACK = [
-  "....kkkkkkkk....",
-  "...knnnnNNnnk...",
-  "..knnnnnnnnnnk..",
-  "..kNNNNNNNNNNk..",
-  "..khhhhhhhhhhk..",
-  "..khhhhhhhhhhk..",
-  "..khhhhhhhhhhk..",
-  "...khhhhhhhhk...",
-];
-const BODY_FRONT = [
-  "..kttottttottk..",
-  ".kjttttttttttjk.",
-  ".kjjjtottotjjjk.",
-  ".ksjjjjjjjjjjsk.",
-  "..kjjjjjjjjjjk..",
-];
-const BODY_BACK = [
-  "..kttttttttttk..",
-  ".kjttttttttttjk.",
-  ".kjjjjjjjjjjjjk.",
-  ".ksjjjjjjjjjjsk.",
-  "..kjjjjjjjjjjk..",
-];
-const SIDE_TOP = [
-  ".....kkkkkkk....",
-  "....knnnnNNnk...",
-  "...knnnnnnnnnk..",
-  "...kNNNNNNNNNk..",
-  "...khhhhhhhhhk..",
-  "..ksssshhhhhhk..",
-  "..ksesshhhhhhk..",
-  "...ksssshhhhk...",
-  "...kttttttttok..",
-  "..kttttjjjjjjk..",
-  "...kjjjjjjjjk...",
-  "...kjsjjjjjjk...",
-  "...kjjjjjjjjk...",
-];
-const LEGS = {
-  stand: ["...kbbbbbbbbk...", "...kbbk..kbbk...", "...kkkk..kkkk..."],
-  walk: ["...kbbbbbbbbk...", "..kbbk...kbbk...", "..kkkk....kkk..."],
-  sideStand: ["....kbbbbbbk....", "....kbbkkbbk....", "....kkk..kkk...."],
-  sideWalk: ["...kbbbbbbbbk...", "..kbbk....kbbk..", "..kkk......kkk.."],
-};
-
-const mirror = (rows: string[]) => rows.map((r) => [...r].reverse().join(""));
-const front = [...HEAD_FRONT, ...BODY_FRONT];
-const back = [...HEAD_BACK, ...BODY_BACK];
-const left = [
-  [...SIDE_TOP, ...LEGS.sideStand],
-  [...SIDE_TOP, ...LEGS.sideWalk],
-  [...SIDE_TOP, ...LEGS.sideWalk],
-];
-// TRAINER[dir] = [stand, walkA, walkB]
-const TRAINER = {
-  down: [[...front, ...LEGS.stand], [...front, ...LEGS.walk], [...front, ...mirror(LEGS.walk)]],
-  up: [[...back, ...LEGS.stand], [...back, ...LEGS.walk], [...back, ...mirror(LEGS.walk)]],
-  left,
-  right: left.map(mirror),
-};
-
-
 // ---------- new art for Boom Orbs ----------
 const ORB = [
   "......kYk.....",
@@ -116,44 +46,6 @@ const ORB = [
   ".knnnnnnnnnnk.",
   "..kknnnnnnkk..",
   "....kkkkkk....",
-];
-
-const BUSH = [
-  "................",
-  ".....kkkkkk.....",
-  "...kkGGGGggkk...",
-  "..kGGGggggggdk..",
-  ".kGGgggggPgggdk.",
-  ".kGggggggggggdk.",
-  "kGGgggdggggggddk",
-  "kGggggggggPggddk",
-  "kGgPgggggggggddk",
-  "kggggggdgggggddk",
-  ".kgggggggggdddk.",
-  ".kdggggggggdddk.",
-  "..kddddgggddddk.",
-  "...kkddddddkkk..",
-  ".....kkkkkk.....",
-  "................",
-];
-
-const STONE = [
-  "kkkkkkkkkkkkkkkk",
-  "kWWWWWWWWWWWWWRk",
-  "kWRRRRRRRRRRRRRk",
-  "kWRRRRRRRRrRRRRk",
-  "kWRRRRRRRRRRRRRk",
-  "kWRRRrRRRRRRRRRk",
-  "kWRRRRRRRRRRRRRk",
-  "kWRRRRRRRRRRrRRk",
-  "kWRRRRRRRRRRRRRk",
-  "kWRRRRRrRRRRRRRk",
-  "kRRRRRRRRRRRRRRk",
-  "krrrrrrrrrrrrrrk",
-  "krrrrrrrrrrrrrrk",
-  "krrrrrrrrrrrrrrk",
-  "krrrrrrrrrrrrrrk",
-  "kkkkkkkkkkkkkkkk",
 ];
 
 // Power-up icons, indexed by item id in shared/sim.ts (1 = Orb+ … 11 = Swap).
@@ -258,16 +150,56 @@ function itemTile(icon: string[]) {
   return c;
 }
 
-// TRAINERS[player][dir][frame]; dir order matches the sim: up, down, left, right.
-const bake = (overrides: Record<string, string>) =>
-  [TRAINER.up, TRAINER.down, TRAINER.left, TRAINER.right].map((frames) => frames.map((f) => toCanvas(f, overrides)));
-
-export const TRAINERS = [bake({}), bake(P2), bake(P3), bake(P4)];
 export const COLORS = ["#3fd0cb", "#ff7a85", "#8fe07a", "#c49bff"]; // also the --p1..--p4 CSS colours
 export const ORBS = [toCanvas(ORB), toCanvas(ORB, { Y: PALETTE.c })]; // two frames: the spark flickers
-export const BUSHES = [toCanvas(BUSH), toCanvas(BUSH, { g: "#8a8a7a", G: "#b0b0a0", d: "#5a5a50", P: "#77776a" })]; // fresh, withered
-export const PILLAR = toCanvas(STONE, { W: "#d6dbe0" });
-export const BORDER = toCanvas(STONE, { W: "#8a8f96", R: "#6b7177", r: "#44484e" });
+// Arena tiles, cut from the packs' sheets by 16 px grid cell.
+const sheet = async (url: string) => {
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  return img;
+};
+const [TILES, FENCE_SHEET, TREES, RANCH, FARMER] = await Promise.all([tilesUrl, fencesUrl, treesUrl, ranchUrl, farmerUrl].map(sheet));
+function cut(src: CanvasImageSource, x: number, y: number) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 16;
+  c.getContext("2d")!.drawImage(src, x, y, 16, 16, 0, 0, 16, 16);
+  return c;
+}
+const cell = (src: CanvasImageSource) => ([c, r]: number[]) => cut(src, c * 16, r * 16);
+const crate = cut(RANCH, 48, 32);
+const cracked = cut(crate, 0, 0);
+{
+  const x = cracked.getContext("2d")!;
+  x.globalCompositeOperation = "source-atop"; // tint only the crate's own pixels
+  x.fillStyle = "rgb(40 24 20 / 0.55)";
+  x.fillRect(0, 0, 16, 16);
+}
+export const GRASS = [[13, 1], [10, 1], [11, 1], [12, 1], [10, 2], [11, 2], [12, 2]].map(cell(TILES)); // plain first
+export const FLOWERS = [[14, 1], [15, 1], [13, 2], [14, 2], [15, 2], [16, 2]].map(cell(TILES));
+export const BLOCKS = [crate, cracked]; // breakable: fresh, crumbling
+export const PILLAR = cut(TREES, 112, 62); // tree stump, sitting on the tile's bottom edge
+export const FENCES = [cut(FENCE_SHEET, 112, 64), cut(FENCE_SHEET, 80, 48)]; // top/bottom rail, side post
+
+// The Ranch farmer, his straw hat dyed in the player's colour. One 20x20 frame (square, so lobby faces
+// don't stretch) from the middle of each 32x32 cell; sheet rows face down, left, right, up.
+function farmer(row: number, col: number, color: string) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 20;
+  const x = c.getContext("2d")!;
+  x.drawImage(FARMER, col * 32 + 6, row * 32 + 4, 20, 20, 0, 0, 20, 20);
+  const px = x.getImageData(0, 0, 20, 20);
+  const hat = parseInt(color.slice(1), 16);
+  for (let i = 0; i < px.data.length; i += 4) {
+    const rgb = (px.data[i] << 16) | (px.data[i + 1] << 8) | px.data[i + 2];
+    const shade = rgb === 0xf4b41b ? 1 : rgb === 0xf47e1b ? 0.7 : 0; // straw: crown, brim
+    if (shade) for (let k = 0; k < 3; k++) px.data[i + k] = ((hat >> (16 - 8 * k)) & 255) * shade;
+  }
+  x.putImageData(px, 0, 0);
+  return c;
+}
+// TRAINERS[player][dir][frame]; dir order matches the sim (up, down, left, right), frames are stand, walk, walk.
+export const TRAINERS = COLORS.map((color) => [3, 0, 1, 2].map((row) => [1, 0, 2].map((col) => farmer(row, col, color))));
 export const ITEM_TILES = ICONS.map((icon) => (icon.length ? itemTile(icon) : null));
 
 // Rotate a grid a quarter turn clockwise.

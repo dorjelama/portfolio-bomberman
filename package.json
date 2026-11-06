@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx watch server/dev.ts",
-    "build": "esbuild client/main.ts --bundle --format=esm --minify --outfile=public/main.js && esbuild server/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
+    "build": "esbuild client/main.ts --bundle --format=esm --minify --loader:.png=dataurl --outfile=public/main.js && esbuild server/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
     "start": "node dist/server.js",
     "check": "tsc",
     "test": "node --import tsx --test shared/sim.test.ts shared/netcode.test.ts"

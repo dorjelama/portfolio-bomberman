@@ -14,8 +14,7 @@ export const FLAME = 30;
 export const NAPALM_FLAME = 2 * TICK_HZ;
 export const READY_TICKS = 2 * TICK_HZ;
 export const ROUND_TICKS = 120 * TICK_HZ; // 2:00, then the arena starts shrinking
-export const SHRINK_EVERY = 12; // ticks between falling walls
-export const END_GRACE = TICK_HZ; // a trade a moment after the last-but-one dies still counts as a draw
+export const SHRINK_EVERY = 30; // ticks between falling walls: a tick-tock, twice a second
 export const RESULT_TICKS = 3 * TICK_HZ;
 export const OVER_TICKS = 6 * TICK_HZ;
 export const WIN_ROUNDS = 2; // default: best of 3
@@ -72,6 +71,8 @@ export const SKULL = 9;
 export const GLOVE = 10;
 export const SWAP = 11;
 const ITEM_WEIGHTS = [0, 30, 30, 15, 10, 8, 7, 7, 6, 10, 6, 4]; // by item id
+export const ALL_ITEMS = ITEM_WEIGHTS.reduce((mask, _, id) => (id ? mask | (1 << id) : mask), 0);
+export const ROUND_CHOICES = [60, 90, 120, 180, 300]; // seconds
 const THROW_HOPS = 3; // a gloved throw lands this many tiles away
 const FLY_SPEED = TILE / 8; // units per tick in the air: one tile every 8 ticks
 
@@ -88,6 +89,19 @@ export interface Options {
   winRounds: number;
   teams: number[] | null; // team per player, or null for free-for-all
   rematch: boolean; // start a new match by itself after "over" (offline); online the server goes back to the lobby
+  roundSecs: number; // round time before sudden death
+  shrink: boolean; // sudden death: walls close in at time-out; otherwise time-out is a draw
+  revenge: boolean; // knocked-out players come back as ghosts on the rim
+  items: number; // which power-ups can drop: bit (1 << item id)
+}
+
+// One knockout, for the match summary. by = who lit the fire (-1 for the walls); back = their ghost came back in.
+export interface Knockout {
+  round: number;
+  victim: number;
+  by: number;
+  how: "orb" | "ghost" | "self" | "team" | "wall";
+  back: boolean;
 }
 
 // Counted over a whole match, for the end-of-match awards.
@@ -154,7 +168,6 @@ export interface Game {
   phase: Phase;
   phaseLeft: number;
   roundTick: number;
-  endAt: number; // roundTick when the round is decided, -1 while it's open
   roundWinner: number; // a player on the winning side, -1 = draw
   matchWinner: number;
   grid: number[];
@@ -167,6 +180,7 @@ export interface Game {
   bombs: Bomb[];
   nextBomb: number;
   shrink: number; // index into SPIRAL of the next wall to fall
+  log: Knockout[]; // every knockout this match, in order, for the summary
   players: Player[];
 }
 
@@ -184,6 +198,7 @@ export const isPillar = (c: number, r: number) => c % 2 === 0 && r % 2 === 0;
 export const onRim = (c: number, r: number) => c === 0 || r === 0 || c === COLS - 1 || r === ROWS - 1;
 export const bombAt = (g: Game, i: number) => g.bombs.find((b) => !b.hops && tileAt(b.x, b.y) === i); // orbs in the air don't count
 export const sideOf = (g: Game, id: number) => (g.opts.teams ? g.opts.teams[id] : id);
+export const roundTicks = (g: Game) => g.opts.roundSecs * TICK_HZ;
 
 // Order the walls fall in after time-out: clockwise from the top-left, outer ring first.
 export const SPIRAL: number[] = (() => {
@@ -242,13 +257,16 @@ export function createGame(players: number, seed: number, opts: Partial<Options>
   const g: Game = {
     tick: 0,
     seed: seed | 0,
-    opts: { map: 0, winRounds: WIN_ROUNDS, teams: null, rematch: true, ...opts },
+    opts: {
+      map: 0, winRounds: WIN_ROUNDS, teams: null, rematch: true,
+      roundSecs: ROUND_TICKS / TICK_HZ, shrink: true, revenge: true, items: ALL_ITEMS,
+      ...opts,
+    },
     map: 0,
     round: 1,
     phase: "ready",
     phaseLeft: 0,
     roundTick: 0,
-    endAt: -1,
     roundWinner: -1,
     matchWinner: -1,
     grid: [],
@@ -261,6 +279,7 @@ export function createGame(players: number, seed: number, opts: Partial<Options>
     bombs: [],
     nextBomb: 1,
     shrink: 0,
+    log: [],
     players: Array.from({ length: players }, (_, id) => freshPlayer(id)),
   };
   newRound(g);
@@ -294,7 +313,6 @@ function newRound(g: Game) {
   g.bombs = [];
   g.shrink = 0;
   g.roundTick = 0;
-  g.endAt = -1;
   g.roundWinner = -1;
   g.phase = "ready";
   g.phaseLeft = READY_TICKS;
@@ -322,6 +340,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
       }
       g.round = 0;
       g.matchWinner = -1;
+      g.log = [];
     }
     g.round++;
     newRound(g);
@@ -342,7 +361,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     const input = inputs[id] ?? 0;
     if (p.alive) control(g, id, p, input);
     else if (p.ghost) haunt(g, id, p, input);
-    else if (g.tick - p.diedAt >= GHOST_DELAY) toRim(p);
+    else if (g.opts.revenge && g.tick - p.diedAt >= GHOST_DELAY) toRim(p);
     p.prev = input;
   }
   passCurses(g);
@@ -353,7 +372,8 @@ export function tickGame(g: Game, inputs: readonly number[]) {
   g.bombs = g.bombs.filter((b) => !(b.hops && b.fuse < -2 * TICK_HZ)); // can't land anywhere (the arena filled in): fizzle out
   explode(g, g.bombs.filter((b) => !b.hops && (b.fuse <= 0 || g.fire[tileAt(b.x, b.y)] > 0)));
 
-  if (g.roundTick > ROUND_TICKS && (g.roundTick - ROUND_TICKS) % SHRINK_EVERY === 0 && g.shrink < SPIRAL.length) {
+  const limit = roundTicks(g);
+  if (g.opts.shrink && g.roundTick > limit && (g.roundTick - limit) % SHRINK_EVERY === 0 && g.shrink < SPIRAL.length) {
     const i = SPIRAL[g.shrink++];
     g.grid[i] = WALL;
     g.items[i] = g.fire[i] = g.crumble[i] = 0;
@@ -364,41 +384,48 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     if (!p.alive) return;
     if (p.invuln) p.invuln--;
     const i = tileAt(p.x, p.y);
-    if (g.grid[i] === WALL) kill(g, id);
+    if (g.grid[i] === WALL) {
+      kill(g, id);
+      g.log.push({ round: g.round, victim: id, by: -1, how: "wall", back: false });
+    }
     else if (g.fire[i] && !p.invuln) {
       if (p.shield) [p.shield, p.invuln] = [false, INVULN];
       else knockedOut(g, id, i);
     }
   });
 
-  // The round is decided once one side (a player, or a team) is left standing.
+  // The round ends the moment one side (a player, or a team) is left standing, and play freezes, so a falling wall
+  // or a stray blast can't take a clear win away. Only knockouts in the very same tick make a draw.
   const sides = new Set(g.players.flatMap((p, id) => (p.alive ? [sideOf(g, id)] : [])));
-  if (g.endAt < 0 && sides.size <= 1) g.endAt = g.roundTick + END_GRACE;
-  if (g.endAt >= 0 && g.roundTick >= g.endAt) {
-    g.roundWinner = sides.size === 1 ? g.players.findIndex((p) => p.alive) : -1;
-    if (g.roundWinner >= 0) {
-      const side = sideOf(g, g.roundWinner);
-      g.players.forEach((p, id) => sideOf(g, id) === side && p.wins++);
-    }
-    if (g.roundWinner >= 0 && g.players[g.roundWinner].wins >= g.opts.winRounds) {
-      g.matchWinner = g.roundWinner;
-      [g.phase, g.phaseLeft] = ["over", OVER_TICKS];
-    } else [g.phase, g.phaseLeft] = ["result", RESULT_TICKS];
+  const timeUp = !g.opts.shrink && g.roundTick >= limit; // no sudden death: time's up, it's a draw
+  if (sides.size > 1 && !timeUp) return;
+  g.roundWinner = sides.size === 1 ? g.players.findIndex((p) => p.alive) : -1;
+  if (g.roundWinner >= 0) {
+    const side = sideOf(g, g.roundWinner);
+    g.players.forEach((p, id) => sideOf(g, id) === side && p.wins++);
   }
+  if (g.roundWinner >= 0 && g.players[g.roundWinner].wins >= g.opts.winRounds) {
+    g.matchWinner = g.roundWinner;
+    [g.phase, g.phaseLeft] = ["over", OVER_TICKS];
+  } else [g.phase, g.phaseLeft] = ["result", RESULT_TICKS];
 }
 
 // Caught in fire on tile i: credit whoever lit it, and a ghost whose orb did it comes back in their place.
 function knockedOut(g: Game, id: number, i: number) {
   kill(g, id);
   const by = g.fireBy[i];
+  const team = by >= 0 && by !== id && sideOf(g, by) === sideOf(g, id);
+  const entry: Knockout = { round: g.round, victim: id, by, how: by === id ? "self" : team ? "team" : g.fireRevenge[i] ? "ghost" : "orb", back: false };
+  g.log.push(entry);
   if (by === id) g.players[id].stats.oops++;
-  if (by < 0 || by === id || sideOf(g, by) === sideOf(g, id)) return;
+  if (by < 0 || by === id || team) return;
   const killer = g.players[by];
   killer.stats.kos++;
   if (!g.fireRevenge[i] || !killer.ghost) return;
   const { wins, stats, prev } = killer;
   Object.assign(killer, freshPlayer(by), { x: center(i % COLS), y: center(Math.floor(i / COLS)), invuln: INVULN, wins, stats, prev });
   stats.comebacks++;
+  entry.back = true;
 }
 
 function kill(g: Game, id: number) {
@@ -647,8 +674,10 @@ function slideKicked(g: Game) {
 
 function rollItem(g: Game) {
   if (rand(g) >= DROP_CHANCE) return 0;
-  let roll = rand(g) * ITEM_WEIGHTS.reduce((a, b) => a + b);
-  return ITEM_WEIGHTS.findIndex((w) => (roll -= w) < 0);
+  const weights = ITEM_WEIGHTS.map((w, id) => (g.opts.items & (1 << id) ? w : 0)); // switched-off power-ups never drop
+  const total = weights.reduce((a, b) => a + b);
+  let roll = rand(g) * total;
+  return total ? weights.findIndex((w) => (roll -= w) < 0) : 0;
 }
 
 // Blasts run all chain reactions in the same tick, so every client sees them land together.

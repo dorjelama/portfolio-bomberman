@@ -66,7 +66,8 @@ server/dev.ts           dev entry: esbuild watch + server
 client/main.ts          input, connection, lobby, HUD, frame loop
 client/render.ts        drawing
 client/audio.ts         synthesised sound effects + music loop
-client/sprites.ts       pixel art (the trainer comes from Critter Catch)
+client/sprites.ts       pixel art for orbs and icons; cuts the arena tiles and players out of client/art
+client/art/             arena tiles and the farmer (players) from free packs: Harvest Summer (SnowHex), Super Retro Ranch (Gif); inlined into main.js
 public/index.html       the page
 ```
 

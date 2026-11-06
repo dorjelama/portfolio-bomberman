@@ -1,6 +1,6 @@
 // Draws one game state. seats[i] is sim player i's seat, which picks their colours.
-import { BELT, BLOCK, COLS, CRUMBLE, FLAME, FLOOR, ICE, PORTAL, ROWS, TILE, WALL, isPillar, type Bomb, type Game } from "../shared/sim.ts";
-import { BELTS, BORDER, BUSHES, COLORS, CURSE_MARK, ICE_IMG, ITEM_TILES, ORBS, PILLAR, PORTAL_IMG, TRAINERS } from "./sprites.ts";
+import { BELT, BLOCK, COLS, CRUMBLE, FLAME, FLOOR, ICE, PORTAL, ROWS, TILE, WALL, type Bomb, type Game } from "../shared/sim.ts";
+import { BELTS, BLOCKS, CURSE_MARK, FENCES, FLOWERS, GRASS, ICE_IMG, ITEM_TILES, ORBS, PILLAR, PORTAL_IMG, TRAINERS } from "./sprites.ts";
 
 const PX = TILE / 16; // sim units per screen pixel
 
@@ -9,18 +9,14 @@ field.width = COLS * 16;
 field.height = ROWS * 16;
 {
   const f = field.getContext("2d")!;
+  f.fillStyle = "rgb(0 0 0 / 0.06)"; // faint checkerboard so the grid stays readable
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
-      f.fillStyle = (c + r) % 2 ? "#6fbf4f" : "#67b648";
-      f.fillRect(c * 16, r * 16, 16, 16);
+      const edge = !c || !r || c === COLS - 1 || r === ROWS - 1; // plain under the fence, or flowers peek out
+      const n = edge ? 28 : (c * 73 + r * 151 + c * r * 7) % 29; // cheap deterministic scatter, as in Critter Catch
+      f.drawImage(n < 2 ? FLOWERS[(c + r) % FLOWERS.length] : n < 12 ? GRASS[1 + (n % 6)] : GRASS[0], c * 16, r * 16);
+      if ((c + r) % 2) f.fillRect(c * 16, r * 16, 16, 16);
     }
-  }
-  for (let i = 0; i < 140; i++) {
-    const x = (i * 97) % field.width; // cheap deterministic scatter, as in Critter Catch
-    const y = (i * 61 + ((i * i) % 37)) % field.height;
-    f.fillStyle = i % 3 ? "#5aa83e" : "#8fd468";
-    f.fillRect(x, y, 2, 1);
-    f.fillRect(x + 3, y - 1, 1, 2);
   }
 }
 
@@ -71,15 +67,13 @@ function drawTrainer(ctx: CanvasRenderingContext2D, g: Game, id: number, seat: n
   const y = Math.round((p.y + nudge.y) / PX);
   const frame = p.moving && g.phase === "play" ? 1 + (Math.floor(t / 9) % 2) : 0;
   ctx.globalAlpha = p.alive ? 1 : p.ghost ? 0.75 : 0.6;
-  ctx.drawImage(TRAINERS[seat][p.dir][frame], x - 8, y - 12);
+  ctx.drawImage(TRAINERS[seat][p.dir][frame], x - 10, y - 16); // 20x20 farmer, feet 3 px below centre; the hat shows the colour
   ctx.globalAlpha = 1;
-  ctx.fillStyle = COLORS[seat];
-  ctx.fillRect(x - 3, y - 15, 6, 2);
   if (p.curse && (t >> 3) % 2) ctx.drawImage(CURSE_MARK, x - 5, y - 27);
   if (p.shield) {
     ctx.strokeStyle = "rgb(63 208 203 / 0.8)";
     ctx.beginPath();
-    ctx.arc(x, y - 4, 9.5, 0, Math.PI * 2);
+    ctx.arc(x, y - 6, 10.5, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -117,11 +111,12 @@ export function render(ctx: CanvasRenderingContext2D, g: Game, seats: number[], 
       const i = r * COLS + c;
       const tile = g.grid[i];
       const inside = c > 0 && r > 0 && c < COLS - 1 && r < ROWS - 1;
-      if (tile === WALL) ctx.drawImage(inside && isPillar(c, r) ? PILLAR : BORDER, c * 16, r * 16);
-      else if (tile === BLOCK) ctx.drawImage(BUSHES[0], c * 16, r * 16);
+      // Inside walls are pillars or, once the arena shrinks, fallen walls: both are stumps.
+      if (tile === WALL) ctx.drawImage(inside ? PILLAR : FENCES[r === 0 || r === ROWS - 1 ? 0 : 1], c * 16, r * 16);
+      else if (tile === BLOCK) ctx.drawImage(BLOCKS[0], c * 16, r * 16);
       else if (tile === CRUMBLE) {
         ctx.globalAlpha = g.crumble[i] / FLAME;
-        ctx.drawImage(BUSHES[1], c * 16 + ((t >> 1) % 2), r * 16);
+        ctx.drawImage(BLOCKS[1], c * 16 + ((t >> 1) % 2), r * 16);
         ctx.globalAlpha = 1;
       }
     }

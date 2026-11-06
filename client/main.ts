@@ -1,8 +1,9 @@
 import { Timeline } from "../shared/netcode.ts";
 import {
-  ACT, BOMB, COLS, CURSES, DOWN, LEFT, MAPS, RIGHT, ROUND_TICKS, ROWS, TICK_HZ, TILE, UP, createGame, sideOf, tileAt, type Game, type Stats,
+  ACT, BOMB, COLS, CURSES, DOWN, LEFT, MAPS, RIGHT, ROUND_CHOICES, ROWS, TICK_HZ, TILE, UP, createGame, roundTicks, sideOf, tileAt,
+  type Game, type Knockout, type Stats,
 } from "../shared/sim.ts";
-import { music, settings as audio, setPref, sfx, unlock } from "./audio.ts";
+import { music, setVolume, sfx, unlock, volume } from "./audio.ts";
 import { render } from "./render.ts";
 import { ITEM_TILES, TRAINERS } from "./sprites.ts";
 
@@ -76,7 +77,7 @@ interface Lobby {
   code: string;
   seats: (LobbySeat | null)[];
   bots: boolean;
-  settings: { map: number; teams: boolean; winRounds: number };
+  settings: { map: number; teams: boolean; winRounds: number; roundSecs: number; revenge: boolean; shrink: boolean; items: number };
   tally: { name: string; wins: number; you: boolean }[];
   countdown: number;
   playing: boolean;
@@ -134,7 +135,6 @@ function onMessage(m: any) {
     tl = new Timeline(m.g, m.you);
     heard.clear(); // orb ids start again from 1 in a new match
     tossed.clear();
-    lastAwards = [];
     [roster, me, shown, stale] = [m.roster, m.you, tl.g, false];
     lastSent = m.g.players[m.you]?.prev ?? 0;
     delay = Math.min(4, Math.max(1, Math.round(rtt / TICK_MS / 4))); // more ping, a little more delay, fewer rewinds
@@ -198,6 +198,7 @@ let lastPhase = "";
 let lastHurry = false;
 let lastKit: number[] = [];
 let lastCurse = 0;
+let lastShrink = 0;
 let lastTile = -1;
 let backUntil = 0; // show "You're back in!" until then
 function listen(g: Game) {
@@ -233,7 +234,7 @@ function listen(g: Game) {
     else sfx.lose();
   }
   lastPhase = g.phase;
-  const hurry = g.phase === "play" && g.roundTick >= ROUND_TICKS;
+  const hurry = g.phase === "play" && g.opts.shrink && g.roundTick >= roundTicks(g);
   if (hurry && !lastHurry) sfx.hurry();
   lastHurry = hurry;
 
@@ -243,6 +244,8 @@ function listen(g: Game) {
   lastKit = kit;
   if (p?.curse && !lastCurse) sfx.curse();
   lastCurse = p?.curse ?? 0;
+  if (g.shrink > lastShrink) sfx.tick(g.shrink % 2 === 0); // a wall fell
+  lastShrink = g.shrink;
 }
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) return send({ type: "sync" });
@@ -264,22 +267,43 @@ $<HTMLInputElement>("bots").onchange = (e) => send({ type: "bots", on: (e.target
 const mapPick = $<HTMLSelectElement>("map");
 const modePick = $<HTMLSelectElement>("mode");
 const winsPick = $<HTMLSelectElement>("wins");
+const timePick = $<HTMLSelectElement>("time");
+const revengePick = $<HTMLInputElement>("revenge");
+const shrinkPick = $<HTMLInputElement>("shrink");
 mapPick.append(...["Random", ...MAPS].map((name, i) => new Option(name, String(i - 1))));
-mapPick.onchange = modePick.onchange = winsPick.onchange = () =>
-  send({ type: "settings", map: Number(mapPick.value), teams: modePick.value === "teams", winRounds: Number(winsPick.value) });
+timePick.append(...ROUND_CHOICES.map((s) => new Option(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`, String(s))));
+// One checkbox per power-up, with its icon.
+const itemPicks = ITEM_HELP.flatMap((help, id) => {
+  if (!id) return [];
+  const box = Object.assign(document.createElement("input"), { type: "checkbox" });
+  const icon = Object.assign(new Image(), { src: ITEM_TILES[id]!.toDataURL(), alt: "" });
+  const label = document.createElement("label");
+  label.title = help;
+  label.append(box, icon, help.split(":")[0]);
+  $("itemPicks").append(label);
+  return [{ id, box }];
+});
+const sendSettings = () =>
+  send({
+    type: "settings",
+    map: Number(mapPick.value),
+    teams: modePick.value === "teams",
+    winRounds: Number(winsPick.value),
+    roundSecs: Number(timePick.value),
+    revenge: revengePick.checked,
+    shrink: shrinkPick.checked,
+    items: itemPicks.reduce((mask, { id, box }) => (box.checked ? mask | (1 << id) : mask), 0),
+  });
+for (const el of [mapPick, modePick, winsPick, timePick, revengePick, shrinkPick, ...itemPicks.map((p) => p.box)]) el.onchange = sendSettings;
 const toggleReady = () => send({ type: "ready", ready: !lobby?.seats.find((s) => s?.you)?.ready });
 $("ready").onclick = toggleReady;
 for (const k of ["sound", "music"] as const) {
-  const btn = $(`${k}Btn`);
-  const show = () => {
-    btn.textContent = `${k === "sound" ? "Sound" : "Music"} ${audio[k] ? "on" : "off"}`;
-    btn.setAttribute("aria-pressed", String(audio[k]));
-  };
-  show();
-  btn.onclick = () => {
-    setPref(k, !audio[k]);
-    show();
-    btn.blur(); // so the arrow keys go back to the game
+  const slider = $<HTMLInputElement>(`${k}Vol`);
+  slider.value = String(Math.round(volume[k] * 100));
+  slider.oninput = () => setVolume(k, Number(slider.value) / 100);
+  slider.onchange = () => {
+    if (k === "sound") sfx.pickup(); // a quick sample at the new level
+    slider.blur(); // so the arrow keys go back to the game
   };
 }
 $("copy").onclick = async () => {
@@ -317,11 +341,15 @@ function showLobby() {
     })
   );
   $<HTMLInputElement>("bots").checked = l.bots;
-  $("tally").textContent = l.tally.length ? `Tonight: ${l.tally.map((e) => `${e.you ? "You" : e.name} ${e.wins}`).join(" · ")}` : "";
+  $("tally").textContent = l.tally.map((e) => `${e.you ? "You" : e.name} ${e.wins}`).join(" · ");
   showAwards($("lastAwards"), lastAwards);
   mapPick.value = String(l.settings.map);
   modePick.value = l.settings.teams ? "teams" : "ffa";
   winsPick.value = String(l.settings.winRounds);
+  timePick.value = String(l.settings.roundSecs);
+  revengePick.checked = l.settings.revenge;
+  shrinkPick.checked = l.settings.shrink;
+  for (const { id, box } of itemPicks) box.checked = !!(l.settings.items & (1 << id));
   const mine = l.seats.find((s) => s?.you);
   const taken = l.seats.flatMap((s, seat) => (s || l.bots ? [seat] : []));
   $("ready").hidden = !mine;
@@ -367,6 +395,30 @@ function showAwards(list: HTMLElement, items: string[]) {
   );
 }
 
+// ---------- knockout log: "Pema knocked out Bot 2", "Bot 2's ghost knocked out you, and Bot 2 is back!" ----------
+function sentence(k: Knockout) {
+  const name = (i: number, start: boolean) => (i === me ? (start ? "You" : "you") : nameOf(i));
+  if (k.how === "wall") return `${name(k.victim, true)} got crushed by the walls`;
+  if (k.how === "self") return k.victim === me ? "You knocked yourself out" : `${nameOf(k.victim)} knocked themselves out`;
+  const by = k.how === "ghost" ? (k.by === me ? "Your ghost" : `${nameOf(k.by)}'s ghost`) : name(k.by, true);
+  const text = `${by} knocked out ${k.how === "team" ? "teammate " : ""}${name(k.victim, false)}`;
+  return k.back ? `${text}, and ${k.by === me ? "you're" : `${nameOf(k.by)} is`} back!` : text;
+}
+
+let lastLog = "";
+function showLog(g: Game) {
+  const key = `${JSON.stringify(g.log)}|${me}|${roster.map((r) => r.name)}`; // whole log: a rewind can swap an entry
+  if (key === lastLog) return;
+  lastLog = key;
+  $("matchLog").replaceChildren(
+    ...[...g.log].reverse().map((k) => {
+      const li = document.createElement("li");
+      li.append(Object.assign(document.createElement("b"), { textContent: `R${k.round} ` }), sentence(k));
+      return li;
+    })
+  );
+}
+
 // ---------- name tags: page text over the canvas, so they stay crisp at any size ----------
 const PX = TILE / 16;
 function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
@@ -388,12 +440,33 @@ function nameTags(g: Game | null, drift: { x: number; y: number }[] = []) {
 }
 
 // ---------- HUD ----------
+// Scoreboard card: face, name (white, so it reads on the dark panel), and round wins as pips out of the target.
+function scoreCard(g: Game, i: number, inPlay: boolean) {
+  const seat = seats()[i];
+  const card = document.createElement("div");
+  card.className = `card p${seat + 1}${inPlay ? "" : " out"}${i === me ? " you" : ""}`;
+  const face = new Image();
+  face.src = FACES[seat];
+  face.alt = "";
+  const who = document.createElement("span");
+  who.className = "who";
+  who.textContent = nameOf(i);
+  const wins = g.players[i].wins;
+  const pips = document.createElement("span");
+  pips.className = "pips";
+  pips.setAttribute("aria-label", `${wins} of ${g.opts.winRounds} round wins`);
+  for (let k = 0; k < g.opts.winRounds; k++) pips.append(Object.assign(document.createElement("i"), { className: k < wins ? "won" : "" }));
+  card.append(face, who, pips);
+  return card;
+}
+
 let lastHud = "";
 function hud() {
   const g = shown;
   const inLobby = !!lobby && !lobby.playing;
-  const hurry = g.roundTick >= ROUND_TICKS;
-  const left = Math.max(0, Math.ceil((ROUND_TICKS - g.roundTick) / TICK_HZ));
+  const limit = roundTicks(g);
+  const hurry = g.opts.shrink && g.roundTick >= limit;
+  const left = Math.max(0, Math.ceil((limit - g.roundTick) / TICK_HZ));
   const timer = hurry ? "HURRY!" : `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   const team = (i: number) => g.opts.teams?.[i];
   const won = (i: number, what: string) =>
@@ -418,30 +491,25 @@ function hud() {
           ? "You're back in!"
           : you?.curse
           ? `Cursed: ${CURSES[you.curse]} (${Math.ceil(you.curseLeft / TICK_HZ)}s). Touch someone to pass it on!`
-          : you?.ghost && g.endAt < 0
+          : you?.ghost
             ? "Ghost: run along the wall, Space lobs an orb in"
-            : hurry && g.roundTick < ROUND_TICKS + 3 * TICK_HZ
+            : hurry && g.roundTick < limit + 3 * TICK_HZ
               ? "Hurry! The walls are closing in"
               : "";
   const score = g.players.map((p, i) => `${seats()[i]}:${nameOf(i)}:${p.wins}:${p.alive || g.phase === "ready"}`).join(",");
 
   const shownAwards = tl && g.phase === "over" ? lastAwards : [];
-  const key = [score, timer, title, sub, toast, inLobby, connected, me, shownAwards].join("|");
+  const key = [score, g.opts.winRounds, timer, title, sub, toast, inLobby, connected, me, shownAwards].join("|");
   if (key === lastHud) return;
   lastHud = key;
   showAwards($("awards"), shownAwards);
-  $("score").replaceChildren(
-    ...(inLobby || !tl
-      ? []
-      : g.players.map((p, i) => {
-          const span = document.createElement("span");
-          span.className = `p${seats()[i] + 1}${p.alive || g.phase === "ready" ? "" : " out"}`;
-          span.textContent = `${nameOf(i)} ${p.wins}`;
-          return span;
-        }))
-  );
-  $("timer").textContent = inLobby || !tl ? "" : timer;
+  $("board").hidden = inLobby || !tl;
+  $("timer").textContent = timer;
   $("timer").classList.toggle("hurry", hurry);
+  // One card per player, split either side of the timer: by team in 2v2, otherwise first half / second half.
+  const onLeft = (i: number) => (g.opts.teams ? g.opts.teams[i] === 0 : i < g.players.length / 2);
+  const cards = g.players.map((p, i) => scoreCard(g, i, p.alive || g.phase === "ready"));
+  $("board").replaceChildren(...cards.filter((_, i) => onLeft(i)), $("timer"), ...cards.filter((_, i) => !onLeft(i)));
   $("who").textContent = tl && !inLobby && me < 0 ? "Watching: you can join after this match." : "";
   $("lobby").hidden = !connected || !inLobby;
   $("status").hidden = !title;
@@ -483,10 +551,11 @@ function frame(now: number) {
       d.y *= 0.8;
     }
   }
-  music(audio.music); // lobby too, once the browser has allowed audio
+  music(volume.music > 0); // lobby too, once the browser has allowed audio
   render(ctx, shown, seats(), tl?.drift);
   nameTags(tl && !(lobby && !lobby.playing) ? shown : null, tl?.drift);
   hud();
+  showLog(shown);
   requestAnimationFrame(frame);
 }
 

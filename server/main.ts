@@ -7,7 +7,7 @@ import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { botInput } from "../shared/bot.ts";
 import { InputQueue } from "../shared/netcode.ts";
-import { MAPS, TICK_HZ, createGame, sideOf, tickGame, type Game } from "../shared/sim.ts";
+import { ALL_ITEMS, MAPS, ROUND_CHOICES, TICK_HZ, createGame, sideOf, tickGame, type Game } from "../shared/sim.ts";
 
 const PORT = Number(process.env.PORT) || 8000;
 const SEATS = 4;
@@ -52,7 +52,12 @@ interface Settings {
   map: number; // -1 = random each round
   teams: boolean; // 2v2: seats 1 + 3 against 2 + 4
   winRounds: number;
+  roundSecs: number;
+  shrink: boolean;
+  revenge: boolean;
+  items: number; // power-ups that can drop, as a bitmask by item id
 }
+const DEFAULT_SETTINGS: Settings = { map: -1, teams: false, winRounds: 2, roundSecs: 120, shrink: true, revenge: true, items: ALL_ITEMS };
 interface Room {
   code: string;
   clients: Client[];
@@ -109,10 +114,9 @@ function startMatch(room: Room) {
     const c = room.clients.find((x) => x.seat === s) ?? null;
     if (c || room.bots) room.roster.push({ seat: s, name: c ? c.name : `Bot ${s + 1}`, bot: !c, client: c, queue: new InputQueue() });
   }
-  const { map, teams, winRounds } = room.settings;
+  const { teams, ...rules } = room.settings;
   room.game = createGame(room.roster.length, randomBytes(4).readInt32LE(), {
-    map,
-    winRounds,
+    ...rules,
     teams: teams ? room.roster.map((r) => r.seat % 2) : null,
     rematch: false,
   });
@@ -220,10 +224,20 @@ function handle(room: Room, c: Client, m: Record<string, unknown>) {
     room.bots = m.on === true;
     sendLobby(room);
   } else if (m.type === "settings") {
-    const { map, teams, winRounds } = m;
+    const { map, teams, winRounds, roundSecs, shrink, revenge, items } = m;
     if (!Number.isInteger(map) || (map as number) < -1 || (map as number) >= MAPS.length) return;
     if (!Number.isInteger(winRounds) || (winRounds as number) < 1 || (winRounds as number) > 5) return;
-    room.settings = { map: map as number, teams: teams === true, winRounds: winRounds as number };
+    if (!ROUND_CHOICES.includes(roundSecs as number)) return;
+    if (!Number.isInteger(items) || ((items as number) & ~ALL_ITEMS) !== 0) return;
+    room.settings = {
+      map: map as number,
+      teams: teams === true,
+      winRounds: winRounds as number,
+      roundSecs: roundSecs as number,
+      shrink: shrink === true,
+      revenge: revenge === true,
+      items: items as number,
+    };
     sendLobby(room);
   }
 }
@@ -233,7 +247,7 @@ wss.on("connection", (ws, req) => {
   if (!/^[a-z0-9]{4,8}$/.test(code)) return ws.close(1008, "bad room");
   let room = rooms.get(code);
   if (!room) {
-    room = { code, clients: [], bots: true, settings: { map: -1, teams: false, winRounds: 2 }, countdown: 0, game: null, roster: [], tally: new Map() };
+    room = { code, clients: [], bots: true, settings: { ...DEFAULT_SETTINGS }, countdown: 0, game: null, roster: [], tally: new Map() };
     rooms.set(code, room);
   }
   const r = room;

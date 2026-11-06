@@ -1,7 +1,7 @@
 // Bot players. A bot only produces input bits, like a keyboard, so it needn't be deterministic:
 // the server runs bots and sends their inputs to everyone like any other player's.
 import {
-  ACT, BLOCK, BOMB, COLS, DOWN, FLOOR, LEFT, RIGHT, ROUND_TICKS, ROWS, SPIRAL, TICK_HZ, TILE, UP, WALL, sideOf, tileAt,
+  ACT, BLOCK, BOMB, COLS, DOWN, FLOOR, LEFT, RIGHT, ROWS, SPIRAL, TICK_HZ, TILE, UP, WALL, roundTicks, sideOf, tileAt,
   type Game,
 } from "./sim.ts";
 
@@ -28,7 +28,7 @@ function dangerMap(g: Game, bombs: Set<number>) {
   const d = new Uint8Array(g.grid.length);
   g.fire.forEach((f, i) => f && (d[i] = 1));
   for (const b of g.bombs) blast(g, tileAt(b.x, b.y), b.range, bombs, d, b.pierce);
-  if (g.roundTick >= ROUND_TICKS - TICK_HZ) for (const i of SPIRAL.slice(g.shrink, g.shrink + 15)) d[i] = 1;
+  if (g.opts.shrink && g.roundTick >= roundTicks(g) - TICK_HZ) for (const i of SPIRAL.slice(g.shrink, g.shrink + 15)) d[i] = 1;
   return d;
 }
 

@@ -6,21 +6,30 @@ let sfxBus: GainNode;
 let musicBus: GainNode;
 let noise: AudioBuffer;
 
-const pref = (k: string) => {
-  try {
-    return localStorage.getItem(k) !== "off";
-  } catch {
-    return true;
-  }
-};
-export const settings = { sound: pref("sound"), music: pref("music") };
+type Channel = "sound" | "music";
+const FULL: Record<Channel, number> = { sound: 0.6, music: 0.2 }; // bus gain with the slider at 100%
+const DEFAULT: Record<Channel, number> = { sound: 0.9, music: 0.75 };
 
-export function setPref(k: "sound" | "music", on: boolean) {
-  settings[k] = on;
+// Saved as 0..1. Saves from before the sliders were "on" / "off".
+function load(k: Channel) {
   try {
-    localStorage.setItem(k, on ? "on" : "off");
+    const v = localStorage.getItem(k);
+    if (v === "off") return 0;
+    const n = Number(v);
+    return v && v !== "on" && n >= 0 && n <= 1 ? n : DEFAULT[k];
+  } catch {
+    return DEFAULT[k];
+  }
+}
+export const volume = { sound: load("sound"), music: load("music") };
+const gainFor = (k: Channel) => volume[k] ** 2 * FULL[k]; // squared, so the slider sounds even (hearing is roughly logarithmic)
+
+export function setVolume(k: Channel, v: number) {
+  volume[k] = Math.min(1, Math.max(0, v));
+  try {
+    localStorage.setItem(k, String(volume[k]));
   } catch {}
-  if (ac) (k === "sound" ? sfxBus : musicBus).gain.value = on ? (k === "sound" ? 0.5 : 0.12) : 0;
+  if (ac) (k === "sound" ? sfxBus : musicBus).gain.value = gainFor(k);
 }
 
 export function unlock() {
@@ -28,8 +37,8 @@ export function unlock() {
   ac = new AudioContext();
   sfxBus = ac.createGain();
   musicBus = ac.createGain();
-  sfxBus.gain.value = settings.sound ? 0.5 : 0;
-  musicBus.gain.value = settings.music ? 0.12 : 0;
+  sfxBus.gain.value = gainFor("sound");
+  musicBus.gain.value = gainFor("music");
   sfxBus.connect(ac.destination);
   musicBus.connect(ac.destination);
   noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
@@ -91,6 +100,11 @@ export const sfx = {
   ready: () => tone(440, 0.12, "square", 0.15),
   go: () => tone(880, 0.25, "square", 0.2),
   hurry: () => notes([[988, 0.1], [740, 0.1], [988, 0.1], [740, 0.1]], "square", 0.15),
+  // A wall falls in sudden death: a clock click (alternating tick / tock) over a soft thud.
+  tick: (tock: boolean) => {
+    tone(tock ? 1100 : 1700, 0.04, "square", 0.18);
+    tone(110, 0.15, "sine", 0.35, 45);
+  },
   comeback: () => notes([[523, 0.07], [659, 0.07], [784, 0.07], [1047, 0.07], [1319, 0.25]], "square", 0.2),
   whoosh: () => hiss(0.3, 0.5, 300, 4000),
   win: () => notes([[523, 0.1], [659, 0.1], [784, 0.1], [1047, 0.35]], "square", 0.2),

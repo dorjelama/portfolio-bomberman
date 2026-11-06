@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
-  ACT, BLOCK, BOMB, BUTTERFINGERS, COLS, CRUMBLE, DOWN, END_GRACE, FLAME, FLOOR, FUSE, GHOST_DELAY, NAPALM_FLAME, OVER_TICKS,
-  REVERSED, RIGHT, ROUND_TICKS, SHRINK_EVERY, SPAWNS, SPIRAL, SWAP, WALL, center, createGame, tickGame, tileAt, type Bomb, type Game,
+  ACT, BLOCK, BOMB, BUTTERFINGERS, COLS, CRUMBLE, DOWN, FLAME, FLOOR, FUSE, GHOST_DELAY, NAPALM_FLAME, OVER_TICKS,
+  REVERSED, RIGHT, ROUND_TICKS, SHRINK_EVERY, SPAWNS, SPIRAL, SWAP, TICK_HZ, WALL, center, createGame, tickGame, tileAt, type Bomb,
+  type Game,
   type Options,
 } from "./sim.ts";
 
@@ -75,7 +76,7 @@ test("pillars block you; corner assist slips you into a nearby open lane", () =>
 });
 
 test("an orb explodes after its fuse: breaks blocks, knocks players out and chains into other orbs", () => {
-  const g = arena();
+  const g = arena(3); // a third player keeps the round going after the knockout
   g.grid[idx(3, 1)] = BLOCK;
   place(g, 0, 1, 1);
   place(g, 1, 2, 1);
@@ -139,7 +140,6 @@ test("after time-out the arena shrinks and crushes whoever is caught", () => {
   run(g, SHRINK_EVERY);
   assert.equal(g.grid[idx(1, 1)], WALL);
   assert.equal(g.players[0].alive, false);
-  run(g, END_GRACE);
   assert.equal(g.phase, "result");
   assert.equal(g.roundWinner, 1);
   assert.equal(g.players[1].wins, 1);
@@ -149,7 +149,7 @@ test("two round wins take the match, then a fresh match starts", () => {
   const g = arena();
   g.players[0].wins = 1;
   g.players[1].alive = false;
-  run(g, END_GRACE + 1);
+  run(g, 1);
   assert.equal(g.phase, "over");
   assert.equal(g.matchWinner, 0);
   run(g, OVER_TICKS);
@@ -249,9 +249,9 @@ test("maps: ice keeps you sliding, belts push you, portals swap you across", () 
 test("teams: the round ends when one team is left, and both teammates score", () => {
   const g = arena(4, { teams: [0, 1, 0, 1], winRounds: 3 });
   run(g, 5);
-  assert.equal(g.endAt, -1);
+  assert.equal(g.phase, "play");
   g.players[1].alive = g.players[3].alive = false;
-  run(g, END_GRACE + 1);
+  run(g, 1);
   assert.equal(g.phase, "result");
   assert.deepEqual(g.players.map((p) => p.wins), [1, 0, 1, 0]);
 });
@@ -317,7 +317,85 @@ test("Swap trades places with an opponent; stats count orbs, bushes and own goal
 test("online matches hold on the final board instead of starting a new one", () => {
   const g = arena(2, { rematch: false, winRounds: 1 });
   g.players[1].alive = false;
-  run(g, END_GRACE + 1 + OVER_TICKS * 2);
+  run(g, 1 + OVER_TICKS * 2);
   assert.equal(g.phase, "over");
   assert.equal(g.matchWinner, 0);
+});
+
+test("room rules: round time, sudden death off, revenge off, and which power-ups drop", () => {
+  const quick = arena(2, { roundSecs: 60 });
+  quick.roundTick = 60 * TICK_HZ;
+  run(quick, SHRINK_EVERY);
+  assert.equal(quick.grid[SPIRAL[0]], WALL, "walls start falling at the chosen time");
+
+  const calm = arena(2, { shrink: false, roundSecs: 60 });
+  place(calm, 1, 7, 7);
+  calm.roundTick = 60 * TICK_HZ - 1;
+  run(calm, 2);
+  assert.equal(calm.phase, "result");
+  assert.equal(calm.roundWinner, -1, "time's up with no sudden death: a draw");
+  assert.equal(calm.grid[SPIRAL[0]], FLOOR, "no walls fell");
+
+  const noGhosts = arena(3, { revenge: false });
+  const out = Object.assign(noGhosts.players[0], { alive: false, diedAt: 0 });
+  run(noGhosts, 120);
+  assert.equal(out.ghost, false, "revenge off: knocked-out players stay out");
+
+  const drops = (items: number) => {
+    const g = createGame(4, 3, { items });
+    const seen = new Set<number>();
+    for (let t = 0; t < 6000 && g.phase !== "over"; t++) {
+      tickGame(g, g.players.map((_, id) => botInput(g, id)));
+      g.items.forEach((it) => it && seen.add(it));
+    }
+    return seen;
+  };
+  assert.deepEqual([...drops(1 << SWAP)], [SWAP], "only switched-on power-ups drop");
+  assert.equal(drops(0).size, 0, "all off: bushes drop nothing");
+});
+
+test("the round goes to the survivor at once: the next falling wall can't turn a clear win into a draw", () => {
+  const g = arena();
+  place(g, 0, SPIRAL[0] % COLS, Math.floor(SPIRAL[0] / COLS)); // first wall to fall
+  place(g, 1, SPIRAL[1] % COLS, Math.floor(SPIRAL[1] / COLS)); // the very next one
+  g.roundTick = ROUND_TICKS;
+  run(g, SHRINK_EVERY);
+  assert.equal(g.players[0].alive, false);
+  run(g, SHRINK_EVERY * 3); // play is frozen: no more walls fall
+  assert.equal(g.roundWinner, 1);
+  assert.equal(g.players[1].alive, true);
+  assert.equal(g.grid[SPIRAL[1]], FLOOR);
+});
+
+test("two players caught in the same blast on the same tick is a draw", () => {
+  const g = arena();
+  place(g, 0, 1, 1);
+  place(g, 1, 2, 1);
+  g.bombs.push(orb(0, 1, 1, { fuse: 1, range: 2 }));
+  tickGame(g, []);
+  assert.equal(g.phase, "result");
+  assert.equal(g.roundWinner, -1);
+});
+
+test("the knockout log records who got whom: orb, own orb, walls, and a ghost coming back", () => {
+  const g = arena(4);
+  place(g, 0, 1, 1);
+  place(g, 1, 2, 1);
+  place(g, 2, 7, 7);
+  place(g, 3, 13, 11);
+  g.bombs.push(orb(0, 1, 1, { fuse: 1, range: 1 })); // player 1's orb: catches player 1 and player 2
+  tickGame(g, []);
+  assert.deepEqual(g.log.map(({ victim, by, how }) => [victim, by, how]), [[0, 0, "self"], [1, 0, "orb"]]);
+
+  Object.assign(g.players[1], { ghost: true, x: center(0), y: center(7) }); // player 2's ghost, left wall, row 7
+  tickGame(g, [0, BOMB]); // lobs an orb 3 tiles in: (3, 7)
+  place(g, 2, 3, 7);
+  run(g, FUSE);
+  const last = g.log.at(-1)!;
+  assert.deepEqual([last.victim, last.by, last.how, last.back], [2, 1, "ghost", true]);
+
+  g.roundTick = ROUND_TICKS;
+  place(g, 3, SPIRAL[0] % COLS, Math.floor(SPIRAL[0] / COLS));
+  run(g, SHRINK_EVERY);
+  assert.deepEqual([g.log.at(-1)!.victim, g.log.at(-1)!.how], [3, "wall"]);
 });
