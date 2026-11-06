@@ -30,6 +30,7 @@ const IMMUNE_TICKS = TICK_HZ; // after passing a curse on, so it can't bounce st
 export const MAX_BOMBS = 8;
 export const MAX_RANGE = 8;
 const BLOCK_CHANCE = 0.75;
+const POTATO_BLOCK_CHANCE = 0.4; // Hot Potato is a chase: fewer crates so the holder can reach someone
 export const DEFAULT_DROP = 35; // percent of broken crates that leave a power-up; a room rule (Options.drop)
 
 // Input bits. Directions are indexed 0..3 (up, down, left, right), so direction d is bit 1 << d.
@@ -111,7 +112,8 @@ export const RETIRED_ITEMS = [7]; // Pierce: never drops, whatever a room asks f
 export const FROST_TICKS = 5 * TICK_HZ; // how long Frost ice lasts
 const CROP_CHANCE = 0.5; // Harvest: a broken crate drops a crop this often, else the usual power-up roll
 export const RESPAWN_TICKS = 2 * TICK_HZ; // Harvest: from a knockout back to your corner
-export const POTATO_TICKS = 15 * TICK_HZ;
+export const POTATO_TICKS = 15 * TICK_HZ; // a fresh potato after a knockout
+export const FIRST_POTATO_TICKS = 25 * TICK_HZ; // the one at Go: everyone starts in a corner, so it needs longer to reach someone
 
 export const CLASSIC = 0;
 export const HARVEST = 1;
@@ -403,7 +405,7 @@ function newRound(g: Game) {
     const c = i % COLS;
     const r = Math.floor(i / COLS);
     if (onRim(c, r) || isPillar(c, r)) return WALL;
-    return !safe.has(i) && rand(g) < BLOCK_CHANCE ? BLOCK : FLOOR;
+    return !safe.has(i) && rand(g) < (g.opts.mode === POTATO ? POTATO_BLOCK_CHANCE : BLOCK_CHANCE) ? BLOCK : FLOOR;
   });
   g.items = Array(n).fill(0);
   g.fire = Array(n).fill(0);
@@ -435,7 +437,7 @@ export function tickGame(g: Game, inputs: readonly number[]) {
     }
     if (g.phase === "ready") {
       g.phase = "play";
-      if (g.opts.mode === POTATO) givePotato(g);
+      if (g.opts.mode === POTATO) givePotato(g, FIRST_POTATO_TICKS);
       return;
     }
     if (g.phase === "over") {
@@ -602,10 +604,10 @@ function cropLeader(g: Game) {
 }
 
 // Hot Potato: a fresh potato for a random player still standing.
-function givePotato(g: Game) {
+function givePotato(g: Game, fuse = POTATO_TICKS) {
   const standing = g.players.filter((p) => p.alive);
   const p = standing[Math.floor(rand(g) * standing.length)];
-  if (p) [p.potato, p.passer] = [POTATO_TICKS, -1];
+  if (p) [p.potato, p.passer] = [fuse, -1];
 }
 
 // Revenge mode: after a knockout you reappear on the nearest stretch of the outer wall.
@@ -690,7 +692,8 @@ function control(g: Game, id: number, p: Player, raw: number) {
     }
   }
 
-  const speed = p.curse === SLUGGISH ? SLUGGISH_SPEED : SPEEDS[p.speed];
+  const boost = p.potato ? 1 : 0; // the potato holder runs a step faster, to catch someone
+  const speed = p.curse === SLUGGISH ? SLUGGISH_SPEED : SPEEDS[Math.min(p.speed + boost, SPEEDS.length - 1)];
   if (g.floor[before] === ICE && p.moving) p.moving = move(g, p, p.dir, speed); // sliding: no steering until you hit something
   else steer(g, p, input, speed, false);
 

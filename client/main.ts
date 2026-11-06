@@ -1,7 +1,7 @@
 import { Timeline } from "../shared/netcode.ts";
 import {
-  ACT, BOMB, BUTTERFINGERS, CHEAT_CODES, CHEAT_SHIFT, COLS, CROP, CURSES, DARK_TICKS, DEFAULT_DROP, DEFAULT_WEIGHTS, DOWN, GHOST_RELOAD, GLOVE, HARVEST, HOLY_TICKS, LANES, LEFT,
-  MAPS, MODES, NIGHT, REMOTE, RIGHT, ROBBED, ROUND_CHOICES, ROWS, SNAP_TICKS, TICK_HZ, TILE, TOPSY_TICKS, UP, cheatBlock, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor,
+  ACT, BOMB, BUTTERFINGERS, CHEAT_CODES, CHEAT_SHIFT, COLS, CROP, CURSES, DARK_TICKS, DEFAULT_DROP, DEFAULT_WEIGHTS, DOWN, FIRST_POTATO_TICKS, GHOST_RELOAD, GLOVE, HARVEST,
+  HOLY_TICKS, LANES, LEFT, MAPS, MODES, NIGHT, POTATO_TICKS, REMOTE, RIGHT, ROBBED, ROUND_CHOICES, ROWS, SNAP_TICKS, TICK_HZ, TILE, TOPSY_TICKS, UP, cheatBlock, createGame, ghostReady, roundTicks, sideOf, tileAt, tractor,
   type Claim, type Game, type Knockout, type Stats,
 } from "../shared/sim.ts";
 import { music, setVolume, sfx, unlock, volume } from "./audio.ts";
@@ -39,7 +39,8 @@ const MODE_HINTS = [
 const MODE_HELP = [
   "Last one (or team) standing wins. At 0:00 the walls close in, or it's a draw with Sudden death off.",
   "Most carrots at 0:00 wins; teams add theirs up. Break crates to find carrots. Knocked out? You drop half and you're back 2 s later.",
-  "Last one standing wins. Bump into someone to pass the potato; its timer keeps running. Whoever holds it at 0 is out.",
+  `Last one standing wins. Bump into someone to pass the potato; its timer keeps running. Whoever holds it at 0 is out. ` +
+    `The one at Go has ${FIRST_POTATO_TICKS / TICK_HZ} s, later ones ${POTATO_TICKS / TICK_HZ} s. You run faster while you hold it, and there are fewer crates to dig through.`,
 ];
 // What each cheat code does, by CHEAT_CODES index: for the Cheats panel and the tooltips in the cheat box.
 const CHEAT_HELP = [
@@ -562,6 +563,21 @@ $("resetRates").onclick = () => {
   sendSettings();
 };
 
+// Rules open in their own card, in the lobby card's place.
+const lobbyCard = $("lobbyCard");
+const rulesCard = $("rulesCard");
+const setRules = (open: boolean) => ([rulesCard.hidden, lobbyCard.hidden] = [!open, open]);
+function showRules(open: boolean) {
+  setRules(open);
+  const card = open ? rulesCard : lobbyCard;
+  $("lobby").scrollTop = 0; // the lobby over the arena scrolls on its own
+  if (card.getBoundingClientRect().top < 0) card.scrollIntoView(); // on a small screen it's part of the page
+  (open ? rulesCard.querySelector("h2")! : $("openRules")).focus({ preventScroll: true });
+}
+$("openRules").onclick = () => showRules(true);
+$("closeRules").onclick = () => showRules(false);
+rulesCard.addEventListener("keydown", (e) => e.key === "Escape" && showRules(false));
+
 const toggleReady = () => send({ type: "ready", ready: !lobby?.seats.find((s) => s?.you)?.ready });
 $("ready").onclick = toggleReady;
 for (const k of ["sound", "music"] as const) {
@@ -663,6 +679,7 @@ function showLobby() {
         : l.settings.teams && new Set(taken.map((s) => s % 2)).size < 2
           ? "2v2 needs someone on each team: change seats or turn on bots."
           : "Starts when everyone is ready.";
+  $("rulesNote").textContent = l.countdown ? `Starting in ${l.countdown}…` : "";
 }
 
 $("games").append(
@@ -965,6 +982,7 @@ function hud() {
   $("board").replaceChildren(...cards.filter((_, i) => onLeft(i)), $("timer"), ...cards.filter((_, i) => !onLeft(i)));
   $("who").textContent = tl && !inLobby && me < 0 ? "Watching: you can join after this match." : "";
   $("lobby").hidden = !connected || !inLobby;
+  if ($("lobby").hidden) setRules(false); // back from a match to the seats, not the rules
   $("status").hidden = !title;
   $("statusText").textContent = title;
   $("statusText").style.color = tint;

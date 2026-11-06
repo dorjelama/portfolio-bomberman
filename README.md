@@ -8,7 +8,7 @@ A 4-player online bomb-maze brawl on the farm, made for playing with friends in 
 - **Games:**
   - Classic: last one standing.
   - Harvest: broken crates drop carrots. A knockout spills half of yours and you're back at your corner 2 s later; most carrots at 0:00 wins. Whoever is 3 or more ahead wears the crown.
-  - Hot Potato: someone gets the potato at Go. Touch someone to pass it on before its 15 s run out; it ticks for the last 3 s. If it goes off on someone you passed it to, the knockout is yours ("Pema cooked Bot 2"), unless they're your teammate. It glows on Night Farm.
+  - Hot Potato: someone gets the potato at Go, with 25 s on it (everyone starts in a corner); a fresh one after a knockout has 15 s. Touch someone to pass it on before it runs out; the clock keeps running, and it ticks for the last 3 s. The holder runs one speed step faster, and the arena has fewer crates (40% instead of 75%) so there's room to chase. If it goes off on someone you passed it to, the knockout is yours ("Pema cooked Bot 2"), unless they're your teammate. It glows on Night Farm.
 - **Teams:** free-for-all, or 2v2 teams (teal + green vs red + purple). First to 1, 2, 3 or 5 round wins.
 - **Revenge:** once knocked out, you ride the outer wall as a ghost and lob orbs in (one throw every 8 seconds; an orb over a ghost's head means it's ready). If your orb knocks out an opponent, you're back in their place, once per round. Get knocked out again and you're a spite ghost: back on the wall, and your orbs still knock people out and score, but they can't bring you back. Ghosts see everyone on Night Farm.
 - **Rounds:** 1:30 by default, then sudden death: the walls close in, three a second.

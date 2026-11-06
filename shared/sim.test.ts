@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { botInput } from "./bot.ts";
 import {
-  ACT, ALL_ITEMS, BELT, BLOCK, BOMB, DEFAULT_WEIGHTS, BUMPERCROP, BUTTERFINGERS, CHEAT_SHIFT, COLDSNAP, COLS, CROP, CRUMBLE, DARK_TICKS, DOWN, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
+  ACT, ALL_ITEMS, BELT, BLOCK, BOMB, DEFAULT_WEIGHTS, BUMPERCROP, BUTTERFINGERS, CHEAT_SHIFT, COLDSNAP, COLS, CROP, CRUMBLE, DARK_TICKS, DOWN, FIRST_POTATO_TICKS, POTATO_TICKS, ROWS, FLAME, FLOOR, FROST_TICKS, FUSE, GHOST_DELAY, GHOST_RELOAD, GRASS, GUST,
   HARVEST, HOLY_TICKS, HOLYCOW, ICE, LANES, LEFT, LIGHTSOUT, MAX_BOMBS, MAX_RANGE, NAPALM_FLAME, POPCORN, RAINDANCE, OVER_TICKS, POTATO, READY_TICKS, RESPAWN_TICKS, RESULT_TICKS, REVERSED, RIGHT, ROBBED, ROUND_TICKS, SKULL,
   SHRINK_EVERY, SNAP_TICKS, SPAWNS, SPEEDS, SPIRAL, SWAP, TOPSYTURVY, cheatBlock, TICK_HZ, TRACTOR, WALL, center, createGame, roundTicks, tickGame, tileAt, tractor, type Bomb,
   type Game,
@@ -571,6 +571,7 @@ test("Hot Potato: someone gets it at Go, a touch passes it on, and it knocks out
   assert.equal(g.phase, "play");
   assert.equal(g.players.filter((p) => p.potato).length, 1);
   const holder = g.players.find((p) => p.potato)!;
+  assert.equal(holder.potato, FIRST_POTATO_TICKS, "the one at Go gets the long fuse");
   const other = g.players.find((p) => p !== holder)!;
   Object.assign(other, { x: holder.x, y: holder.y });
   tickGame(g, []);
@@ -582,6 +583,22 @@ test("Hot Potato: someone gets it at Go, a touch passes it on, and it knocks out
   assert.equal(other.alive, false);
   assert.equal(g.log.at(-1)!.how, "potato");
   assert.equal(g.players.filter((p) => p.alive && p.potato).length, 1, "a fresh one goes to someone still standing");
+  const fresh = g.players.find((p) => p.alive && p.potato)!;
+  assert.ok(fresh.potato >= POTATO_TICKS - 1 && fresh.potato <= POTATO_TICKS, "with the shorter fuse");
+});
+
+test("Hot Potato: fewer crates than Classic, and the holder runs a step faster", () => {
+  const crates = (g: Game) => g.grid.filter((t) => t === BLOCK).length;
+  for (let seed = 1; seed <= 5; seed++) {
+    assert.ok(crates(createGame(4, seed, { mode: POTATO })) < 0.7 * crates(createGame(4, seed)), `seed ${seed}`);
+  }
+  const g = arena(2, { mode: POTATO });
+  place(g, 0, 1, 1);
+  place(g, 1, 1, ROWS - 2);
+  g.players[0].potato = 10 * TICK_HZ;
+  run(g, 20, [RIGHT, RIGHT]);
+  assert.equal(g.players[0].x - center(1), 20 * SPEEDS[1]);
+  assert.equal(g.players[1].x - center(1), 20 * SPEEDS[0]);
 });
 
 test("Hot Potato: whoever passed it on scores the knockout, but not a fresh potato or a pass to a teammate", () => {

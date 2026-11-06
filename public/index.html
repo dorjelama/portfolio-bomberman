@@ -145,17 +145,18 @@
       #seats button { padding: 6px 8px; }
       #seats img.crown { width: 20px; height: 12px; vertical-align: middle; }
       #lobby .settings { display: flex; flex-wrap: wrap; gap: 8px 16px; }
-      #rules { display: grid; gap: 8px; }
-      #rules[open] { padding: 8px; border: 2px solid var(--dim); border-radius: 4px; }
-      #rules summary { cursor: pointer; color: var(--accent); }
-      #rules > * + * { margin-top: 8px; }
-      #itemPicks { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px 14px; }
-      #itemPicks .pick { display: flex; gap: 6px; align-items: center; }
-      #itemPicks label { flex: 1; min-width: 0; gap: 6px; font-size: 9px; }
+      #lobby #rulesCard { width: min(100%, 760px); } /* wide enough for three power-ups a row */
+      #rulesCard h2:focus { outline: none; }
+      #rulesCard .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+      #rulesNote:empty { display: none; }
+      #openRules { justify-self: start; }
+      button.alt { background: none; color: var(--accent); border: 2px solid var(--accent); padding: 8px 10px; }
+      #itemPicks { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); gap: 6px 12px; } /* 228: a whole row, longest name included */
+      #itemPicks .pick { display: flex; gap: 4px; align-items: center; }
+      #itemPicks label { flex: 1 0 auto; gap: 6px; font-size: 9px; }
       #itemPicks .share { min-width: 5ch; text-align: right; font-size: 9px; color: var(--dim); }
       .rate { font: inherit; width: 6.5em; padding: 4px; background: var(--bg); color: var(--ink); border: 2px solid var(--dim); }
       .rate:disabled { opacity: 0.4; }
-      #resetRates { justify-self: start; padding: 6px 8px; }
       #itemPicks img { width: 20px; height: 20px; image-rendering: pixelated; }
       select { font: inherit; padding: 6px; background: var(--bg); color: var(--ink); border: 2px solid var(--dim); }
       input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
@@ -294,7 +295,7 @@
         <ol id="feed" aria-hidden="true"></ol>
         <div id="callout" aria-hidden="true"></div>
         <section id="lobby" aria-label="Lobby" hidden>
-          <div class="card">
+          <div id="lobbyCard" class="card">
             <h2>Room <span id="roomCode"></span></h2>
             <button id="copy" type="button">Copy invite link</button>
             <label>Your name <input id="name" maxlength="12" autocomplete="nickname" placeholder="Farmer" /></label>
@@ -311,21 +312,27 @@
               </label>
             </div>
             <p id="gameHelp" class="help" aria-live="polite"></p>
-            <details id="rules">
-              <summary>Rules</summary>
-              <div class="settings">
-                <label>Round time <select id="time"></select></label>
-                <label><input type="checkbox" id="revenge" /> Revenge ghosts</label>
-                <label title="Off: a round still going at 0:00 is a draw"><input type="checkbox" id="shrink" /> Sudden death: walls close in at 0:00</label>
-                <label title="Type cheat codes during a match. Each works once a round, for whoever types it first."><input type="checkbox" id="cheats" /> Cheats</label>
-              </div>
-              <label title="In Harvest, half of broken crates drop a carrot instead">Crates that drop a power-up <input type="number" id="drop" class="rate" min="0" max="100" step="5" inputmode="numeric" />%</label>
-              <p class="help">Power-ups that can drop, and how often: each number counts against the others that are ticked, and the % is its share of drops.</p>
-              <div id="itemPicks"></div>
-              <button id="resetRates" type="button">Reset power-ups</button>
-            </details>
+            <button id="openRules" class="alt" type="button">Rules…</button>
             <button id="ready" type="button" hidden>Ready!</button>
             <p id="lobbyNote" class="help" aria-live="polite"></p>
+          </div>
+          <!-- Rules take the lobby card's place while open, so the lobby itself stays short. -->
+          <div id="rulesCard" class="card" hidden>
+            <h2 tabindex="-1">Rules</h2>
+            <div class="settings">
+              <label>Round time <select id="time"></select></label>
+              <label><input type="checkbox" id="revenge" /> Revenge ghosts</label>
+              <label title="Type cheat codes during a match. Each works once a round, for whoever types it first."><input type="checkbox" id="cheats" /> Cheats</label>
+              <label title="Off: a round still going at 0:00 is a draw"><input type="checkbox" id="shrink" /> Sudden death: walls close in at 0:00</label>
+            </div>
+            <label title="In Harvest, half of broken crates drop a carrot instead">Crates that drop a power-up <input type="number" id="drop" class="rate" min="0" max="100" step="5" inputmode="numeric" />%</label>
+            <p class="help">Power-ups that can drop, and how often: each number counts against the others that are ticked, and the % is its share of drops.</p>
+            <div id="itemPicks"></div>
+            <div class="actions">
+              <button id="resetRates" class="alt" type="button">Reset power-ups</button>
+              <button id="closeRules" type="button">Done</button>
+            </div>
+            <p id="rulesNote" class="help" aria-live="polite"></p>
           </div>
         </section>
       </div>

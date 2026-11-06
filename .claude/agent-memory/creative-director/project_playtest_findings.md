@@ -13,7 +13,7 @@ Observed 2026-11-06 (1 human idling + 3 bots):
 - Persistent toasts (potato 15 s, ghost 8 s, curse 10 s) cover the top-middle of the arena.
 
 Open playtests (not yet run with humans):
-- Hot Potato, 2 humans + 2 bots on Meadow: passes per potato; under 2 on average -> give the holder +1 speed step.
+- Hot Potato, 2 humans + 2 bots on Meadow: passes per potato; under 2 on average -> give the holder +1 speed step. **Settled 2026-11-06 by a bot sim:** the first potato was never passed in ~92% of rounds (corners + 75% crates + 15 s), so the user asked for a revamp. Built (uncommitted): 40% crates in Hot Potato, 25 s fuse for the one at Go (15 s after a knockout), holder +1 speed step. Bots then passed the first potato in ~97% of rounds on Meadow and ~90% on random maps. Still worth a human check: does 40% crates make power-ups too scarce?
 - Harvest, Meadow 1:30: clock when the last crate breaks; fewer than 2 carrot steals afterwards -> crate regrowth.
 - Night Farm, 4 humans: laughs vs "I never found anyone".
 
